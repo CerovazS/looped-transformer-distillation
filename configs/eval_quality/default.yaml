@@ -7,3 +7,5 @@ every_n_epochs: 1
 run_on_test: true
 require_logits: true
 max_ppl_exp: 20.0
+projections:
+  - student_head

@@ -78,6 +78,12 @@ class _FlaggedLogitTeacher:
         )
 
 
+class _ProjectingFlaggedLogitTeacher(_FlaggedLogitTeacher):
+    def project_logits(self, z):
+        batch, seq_len, _ = z.shape
+        return torch.randn(batch, seq_len, 16, device=z.device)
+
+
 def test_live_teacher_logits_only_requested_for_quality_eval():
     student = StudentFlowModel(latent_dim=8, hidden_dim=32, num_layers=1, num_heads=4, vocab_size=16)
     teacher = _FlaggedLogitTeacher()
@@ -98,6 +104,51 @@ def test_live_teacher_logits_only_requested_for_quality_eval():
 
     assert teacher.calls == [False, True]
     assert prepared["logits"] is not None
+
+
+def test_live_teacher_logits_not_requested_when_teacher_can_project():
+    student = StudentFlowModel(latent_dim=8, hidden_dim=32, num_layers=1, num_heads=4, vocab_size=16)
+    teacher = _ProjectingFlaggedLogitTeacher()
+    module = DistillationModule(
+        student=student,
+        loss_module=LoopDistillationLoss(endpoint_kl_weight=0.0),
+        quality_evaluator=QualityEvaluator(enabled=True, projections=["student_head", "teacher_head"]),
+        teacher=teacher,
+        live_depths=[0, 1],
+    )
+    batch = {
+        "tokens": torch.randint(0, 16, (2, 5)),
+        "attention_mask": torch.ones(2, 5, dtype=torch.bool),
+    }
+
+    prepared = module._prepare_batch(dict(batch), "val")
+    metrics = module.quality_evaluator.compute(prepared, module.student, teacher=teacher)
+
+    assert teacher.calls == [False]
+    assert prepared["logits"] is None
+    assert "teacher_head/nll_student" in metrics
+
+
+def test_live_quality_eval_can_use_teacher_head_projection():
+    student = StudentFlowModel(latent_dim=8, hidden_dim=32, num_layers=1, num_heads=4, vocab_size=16)
+    teacher = MockTeacher(latent_dim=8, vocab_size=16, max_depth=2)
+    module = DistillationModule(
+        student=student,
+        loss_module=LoopDistillationLoss(endpoint_kl_weight=0.0),
+        quality_evaluator=QualityEvaluator(enabled=True, projections=["student_head", "teacher_head"]),
+        teacher=teacher,
+        live_depths=[0, 1, 2],
+    )
+    batch = {
+        "tokens": torch.randint(0, 16, (2, 5)),
+        "attention_mask": torch.ones(2, 5, dtype=torch.bool),
+    }
+
+    prepared = module._prepare_batch(batch, "val")
+    metrics = module.quality_evaluator.compute(prepared, module.student, teacher=teacher)
+
+    assert "student_head/nll_student" in metrics
+    assert "teacher_head/nll_student" in metrics
 
 
 class _TokenOnlyDataset(torch.utils.data.Dataset):
@@ -171,8 +222,9 @@ def test_hydra_live_experiment_overrides_defaults():
     assert cfg.live.enabled is True
     assert cfg.data._target_ == "loopdistill.data.live.TextTokenDataModule"
     assert cfg.teacher._target_ == "loopdistill.teachers.attractor.AttractorTeacher"
-    assert cfg.teacher.return_logits is True
+    assert cfg.teacher.return_logits is False
     assert cfg.eval_quality.enabled is True
+    assert cfg.eval_quality.projections == ["student_head", "teacher_head"]
     assert cfg.output_dir.startswith("outputs/live_distill/")
 
 
@@ -185,5 +237,7 @@ def test_hydra_full_live_experiment_uses_ddp_and_k8():
     assert cfg.trainer.strategy == "ddp_find_unused_parameters_true"
     assert cfg.live.depths == list(range(9))
     assert cfg.loss.rollout_steps == 8
+    assert cfg.teacher.return_logits is False
+    assert cfg.eval_quality.projections == ["student_head", "teacher_head"]
     assert cfg.data._target_ == "loopdistill.data.token_shards.TokenShardDataModule"
     assert len({cfg.tokenization.train_split, cfg.tokenization.val_split, cfg.tokenization.test_split}) == 3

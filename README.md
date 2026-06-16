@@ -124,8 +124,12 @@ for research runs that need those objectives.
 ### 3. Evaluate Endpoint Quality
 
 When endpoint logits are available, `eval_quality.enabled=true` logs language-model quality
-metrics under `eval_quality/val/*` and `eval_quality/test/*`. These metrics are separate from the
-training loss unless the loss configuration explicitly enables endpoint KL.
+metrics under `eval_quality/val/*` and `eval_quality/test/*`. Live teacher runs can evaluate two
+endpoint projections: `student_head` tests the student's own LM head, while `teacher_head` rolls
+the student to `z_K_student` and projects it through the original teacher `ln_f/lm_head`. The
+`teacher_head` path is the primary replacement test for looped-layer distillation because the
+teacher backbone and LM head stay fixed and only the loop dynamics are replaced. These metrics are
+separate from the training loss unless the loss configuration explicitly enables endpoint KL.
 
 ```bash
 uv run loopdistill-train \

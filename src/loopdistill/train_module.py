@@ -67,7 +67,7 @@ class DistillationModule(L.LightningModule):
             return
         if prefix == "test" and not bool(getattr(self.quality_evaluator, "run_on_test", True)):
             return
-        metrics = self.quality_evaluator.compute(batch, self.student)
+        metrics = self.quality_evaluator.compute(batch, self.student, teacher=self.teacher)
         for key, value in metrics.items():
             self.log(
                 f"eval_quality/{prefix}/{key}",
@@ -98,7 +98,11 @@ class DistillationModule(L.LightningModule):
             quality_enabled = quality_enabled and self._should_run_val_quality()
         if prefix == "test":
             quality_enabled = quality_enabled and bool(getattr(self.quality_evaluator, "run_on_test", True))
-        return quality_enabled or float(getattr(self.loss_module, "endpoint_kl_weight", 0.0)) != 0.0
+        quality_needs_batch_logits = bool(
+            quality_enabled
+            and getattr(self.quality_evaluator, "needs_batch_teacher_logits", lambda teacher=None: True)(self.teacher)
+        )
+        return quality_needs_batch_logits or float(getattr(self.loss_module, "endpoint_kl_weight", 0.0)) != 0.0
 
     def _maybe_add_live_teacher_trajectory(
         self,

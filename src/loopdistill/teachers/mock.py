@@ -22,6 +22,15 @@ class MockTeacher(TeacherRunner):
         self.max_depth = max_depth
         self.noise_scale = noise_scale
 
+    def _projection(self, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        proj = torch.arange(self.latent_dim * self.vocab_size, device=device, dtype=dtype).reshape(
+            self.latent_dim, self.vocab_size
+        )
+        return torch.sin(proj / proj.numel())
+
+    def project_logits(self, z: torch.Tensor) -> torch.Tensor:
+        return torch.einsum("bld,dv->blv", z, self._projection(z.device, z.dtype)).float()
+
     def run_batch(
         self,
         tokens: torch.Tensor,
@@ -40,11 +49,7 @@ class MockTeacher(TeacherRunner):
             noise = self.noise_scale * (1.0 - alpha) * torch.cos(base + k)
             states.append((1 - alpha) * base + alpha * fixed + noise)
         z = torch.stack(states, dim=1)
-        proj = torch.arange(self.latent_dim * self.vocab_size, device=device, dtype=z.dtype).reshape(
-            self.latent_dim, self.vocab_size
-        )
-        proj = torch.sin(proj / proj.numel())
-        logits = torch.einsum("bkld,dv->bklv", z, proj)
+        logits = torch.einsum("bkld,dv->bklv", z, self._projection(device, z.dtype))
         residual_norm = (z[:, 1:] - z[:, :-1]).pow(2).mean(dim=(2, 3)).sqrt()
         return TeacherOutput(
             z=z,

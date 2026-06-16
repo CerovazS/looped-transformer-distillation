@@ -21,6 +21,14 @@ class FixedLogitStudent(nn.Module):
         )
 
 
+class FixedProjectionTeacher:
+    def __init__(self, logits: torch.Tensor):
+        self.logits = logits
+
+    def project_logits(self, z: torch.Tensor) -> torch.Tensor:
+        return self.logits.to(device=z.device)
+
+
 def test_quality_metrics_identical_logits():
     logits = torch.tensor(
         [
@@ -72,3 +80,33 @@ def test_quality_metrics_student_worse_than_teacher_nll():
     assert metrics["nll_delta"] > 0
     assert metrics["top1_agreement"] < 1
 
+
+def test_quality_metrics_can_compare_student_and_teacher_heads():
+    teacher_logits = torch.tensor(
+        [
+            [
+                [0.0, 8.0, 0.0],
+                [0.0, 0.0, 8.0],
+                [8.0, 0.0, 0.0],
+            ]
+        ]
+    )
+    student_head_logits = torch.zeros_like(teacher_logits)
+    batch = {
+        "tokens": torch.tensor([[0, 1, 2]]),
+        "attention_mask": torch.ones(1, 3, dtype=torch.bool),
+        "z": torch.zeros(1, 2, 3, 4),
+        "logits": teacher_logits.unsqueeze(1),
+    }
+    evaluator = QualityEvaluator(enabled=True, top_k=1, projections=["student_head", "teacher_head"])
+    metrics = evaluator.compute(
+        batch,
+        FixedLogitStudent(student_head_logits),
+        teacher=FixedProjectionTeacher(teacher_logits),
+    )
+
+    assert "student_head/nll_student" in metrics
+    assert "teacher_head/nll_student" in metrics
+    assert metrics["student_head/nll_student"] > metrics["student_head/nll_teacher"]
+    assert torch.isclose(metrics["teacher_head/nll_delta"], torch.zeros(()), atol=1e-6)
+    assert torch.isclose(metrics["teacher_head/top1_agreement"], torch.ones(()))

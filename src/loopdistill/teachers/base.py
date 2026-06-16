@@ -26,3 +26,7 @@ class TeacherRunner(ABC):
         depths: list[int],
     ) -> TeacherOutput:
         raise NotImplementedError
+
+    def project_logits(self, z: torch.Tensor) -> torch.Tensor:
+        """Project latent states through the teacher endpoint LM head without running the loop."""
+        raise NotImplementedError(f"{type(self).__name__} does not expose teacher-head projection.")

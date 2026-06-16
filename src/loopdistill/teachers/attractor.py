@@ -233,21 +233,39 @@ class AttractorTeacher(TeacherRunner):
                 return path
         raise FileNotFoundError(f"No supported Attractor weights found in {self.checkpoint_dir}")
 
+    def project_logits(self, z: torch.Tensor) -> torch.Tensor:
+        model = self._load_model()
+        states = z.to(device=self.device)
+        if self.dtype is not None:
+            states = states.to(dtype=self.dtype)
+        with torch.no_grad():
+            logits = self._project_logits(model, states)
+        return logits
+
     def _maybe_project_logits(self, model, states: list[torch.Tensor]) -> torch.Tensor | None:
         if not self.return_logits:
             return None
         selected = states if self.logit_depths == "all" else [states[-1]]
-        logits = []
-        for state in selected:
-            x = model.transformer.ln_f(state)
-            if model.config.use_fused_head == "full-triton":
-                weight = model.lm_head.weight
-                out = torch.matmul(x, weight.T if model.config.tie_embeddings else weight)
-            else:
-                out = model.lm_head(x)
-            out = out.float() * model.config.init.logit_scale
-            if model.config.logit_softcap is not None:
-                softcap = model.config.logit_softcap
-                out = softcap * torch.tanh(out / softcap)
-            logits.append(out.detach())
-        return torch.stack(logits, dim=1)
+        return self._project_logits(model, torch.stack(selected, dim=1)).detach()
+
+    def _project_logits(self, model, states: torch.Tensor) -> torch.Tensor:
+        squeeze_depth = False
+        if states.dim() == 3:
+            states = states.unsqueeze(1)
+            squeeze_depth = True
+        if states.dim() != 4:
+            raise ValueError(f"Expected latent states with shape [B,L,D] or [B,K,L,D], got {tuple(states.shape)}.")
+        batch, depth, seq_len, dim = states.shape
+        flat_states = states.reshape(batch * depth, seq_len, dim)
+        x = model.transformer.ln_f(flat_states)
+        if model.config.use_fused_head == "full-triton":
+            weight = model.lm_head.weight
+            out = torch.matmul(x, weight.T if model.config.tie_embeddings else weight)
+        else:
+            out = model.lm_head(x)
+        out = out.float() * model.config.init.logit_scale
+        if model.config.logit_softcap is not None:
+            softcap = model.config.logit_softcap
+            out = softcap * torch.tanh(out / softcap)
+        out = out.reshape(batch, depth, seq_len, out.shape[-1])
+        return out[:, 0] if squeeze_depth else out

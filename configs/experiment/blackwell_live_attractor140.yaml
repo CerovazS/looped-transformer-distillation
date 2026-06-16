@@ -25,6 +25,9 @@ loss:
 
 eval_quality:
   enabled: true
+  projections:
+    - student_head
+    - teacher_head
   top_k: 5
   temperature: 1.0
   rollout_steps: 2
@@ -40,7 +43,7 @@ data:
 
 teacher:
   max_depth: 2
-  return_logits: true
+  return_logits: false
   logit_depths: final
 
 trainer:

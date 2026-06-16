@@ -23,7 +23,7 @@ Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026
 - [x] P0.5 smoke live teacher: training senza shard latenti, con Attractor chiamato nel training step.
   Postmortem: live smoke su Blackwell completato; il teacher non entra nell'optimizer, output solo in `outputs/live_distill/...`.
 - [x] P0.6 eval quality endpoint: metriche KL/NLL/PPL/top-k su logits finali teacher/student.
-  Postmortem: `eval_quality` e' separato dalla loss; validation resta leggera, quality gira ogni N epoch o in test quando abilitata.
+  Postmortem: `eval_quality` e' separato dalla loss; validation resta leggera, quality gira ogni N epoch o in test quando abilitata. Nei run live Attractor ora valuta sia `student_head` sia `teacher_head`.
 - [ ] P0.7 baseline piccola riproducibile: estrazione offline o live su 1k/128 token, `K=8`, training breve e report.
   Mancante: run non-smoke con subset sufficiente, metriche confrontabili e curve.
 
@@ -60,12 +60,12 @@ Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026
 - FineWeb-Edu basta per P0: il primo run usa un subset piccolo, non tutto il corpus.
 - Il primo teacher e' `attractor-140m`; `370m/770m` restano P1 per costo e storage.
 - Per P0 non si salvano full logits per ogni depth: sono troppo grandi. Si parte con latenti, residual, solver iters; KL endpoint resta opzionale.
-- Per eval quality si richiedono solo logits finali `K`: `teacher.return_logits=true` e `teacher.logit_depths=final`. Questo evita di salvare full logits a ogni depth.
+- Per eval quality servono solo logits finali `K`. Nei run live Attractor il default e' `teacher.return_logits=false`: il target `logits_teacher_K` viene ottenuto proiettando `z_K_teacher`, e il test replacement proietta `z_K_student` con la stessa `teacher_head`. Questo evita full logits dentro `run_batch` e chiarisce che il loop teacher non e' usato nel ramo student.
 - FineWeb-Edu `sample-10BT` espone solo `train`; live validation/test usano slicing HF non sovrapposto (`train[:98%]`, `train[98%:99%]`, `train[99%:]`) invece di riusare lo stesso split.
 - La traiettoria Attractor P0 puo' essere ricostruita richiamando il solver con `max_iter_override=k` per ogni depth richiesto. E' piu' lenta di un hook interno o di `return_trajectory=True`, ma evita patch alla repo esterna.
 - Le sequenze P0 sono fixed length dopo tokenizzazione/troncamento; l'attention mask resta nel formato shard, ma Attractor ignora il padding mask nel backend causale corrente.
 - Offline e live restano due path supportati: offline per debug/riproducibilita' e live per non materializzare tutti i latenti. In live mode il teacher e' chiamato in `torch.no_grad()`, i latenti sono clonati prima della loss, e l'optimizer usa solo `student.parameters()`.
-- Le metriche `val/*` misurano la loss di distillazione frequente; le metriche `eval_quality/val/*` e `eval_quality/test/*` misurano l'uso effettivo dello student come language model.
+- Le metriche `val/*` misurano la loss di distillazione frequente; le metriche `eval_quality/*/student_head/*` misurano lo student come LM autonomo, mentre `eval_quality/*/teacher_head/*` misura il replacement dei looped layers con backbone e LM head teacher congelati.
 
 ## Comandi Verificati Su Blackwell
 
@@ -153,13 +153,13 @@ Nota: se FineWeb-Edu non e' ancora materializzato nella cache Arrow di `datasets
   `compute(batch, student, loss_cfg) -> dict[str, Tensor]`, con ritorno sempre scalari loggabili e metriche diagnostiche.
 
 - `QualityEvaluator`:
-  `compute(batch, student) -> dict[str, Tensor]`, richiede `z`, `tokens`, `attention_mask` e logits teacher finali. Esegue rollout student fino a `z_K_student`, proietta `logits_student_K`, confronta contro `logits_teacher_K` e next-token targets.
+  `compute(batch, student, teacher=None) -> dict[str, Tensor]`, richiede `z`, `tokens`, `attention_mask` e logits teacher finali da batch oppure `teacher.project_logits(z_K_teacher)`. Esegue rollout student fino a `z_K_student`, poi puo' misurare `student_head`, `teacher_head`, o entrambe.
 
 ## Loss E Metodi
 
 - P0 FM lineare: campiona coppie teacher `(a,b)` dalla traiettoria, interpola `z_t = (1-s) z_a + s z_b`, target `v = (z_b - z_a)/(t_b - t_a)`, loss masked MSE su latenti.
 - P0 endpoint/logit: KL temperatura-scalata tra logits student endpoint e `logits_K`; supportare full logits o top-k compresso.
-- P0 eval quality: non ottimizza. Misura `KL(logits_student_K, logits_teacher_K)`, `NLL teacher`, `NLL student`, `NLL delta`, `PPL teacher`, `PPL student`, `PPL delta`, `top1 agreement`, `top-k overlap`.
+- P0 eval quality: non ottimizza. Misura due projection path quando configurato: `student_head` (`z_K_student -> student.logit_head`) e `teacher_head` (`z_K_student -> teacher.ln_f/lm_head`). Per ciascun path registra `KL(logits_student_K, logits_teacher_K)`, `NLL teacher`, `NLL student`, `NLL delta`, `PPL teacher`, `PPL student`, `PPL delta`, `top1 agreement`, `top-k overlap`.
 - P0 latent reconstruction: rollout student fino a `K` e MSE masked contro `z_K`.
 - P0 stability: se esiste una mappa `F`, penalizzare `||F(z_K)-z_K||`; per DEQ/Attractor usare anche residual teacher quando disponibile.
 - P1 MeanFlow: port PyTorch locale della formula MeanFlow con `torch.func.jvp`; default autocast off nel JVP, target detach, fallback finite-difference.
