@@ -1,5 +1,7 @@
 # Looped Transformer Flow Distillation
 
+![Looped Transformer Flow Distillation cover](assets/readme-cover.png)
+
 Local, lightweight training suite for distilling looped transformer latent trajectories with
 flow matching, endpoint/logit distillation, latent reconstruction, stability regularization,
 and experimental MeanFlow/Shortcut/DEQ objectives.

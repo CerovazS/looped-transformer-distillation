@@ -9,6 +9,7 @@ tmp/
 
 *.pdf
 *.png
+!assets/readme-cover.png
 *.jpg
 *.jpeg
 *.gif
