@@ -1,6 +1,6 @@
 # @package _global_
 name: blackwell_live_attractor140_p0_full
-run_id: live_p0_attractor140_k8_s128_${now:%Y%m%d_%H%M%S}
+run_id: live_p0_attractor140_k8_s512_${now:%Y%m%d_%H%M%S}
 output_dir: outputs/live_distill/${run_id}
 
 defaults:
@@ -35,10 +35,10 @@ eval_quality:
   run_on_test: true
 
 data:
-  train_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/train.pt
-  val_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/val.pt
-  test_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/test.pt
-  batch_size: 2
+  train_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/train.pt
+  val_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/val.pt
+  test_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/test.pt
+  batch_size: 32
   num_workers: 4
   pin_memory: true
   drop_last: true
@@ -54,7 +54,7 @@ trainer:
   devices: 2
   strategy: ddp
   precision: bf16-mixed
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 1
   log_every_n_steps: 10
   limit_train_batches: null
   limit_val_batches: null
