@@ -1,220 +1,364 @@
-# Piano Di Implementazione: Looped Transformer Flow Distillation Suite
+# Looped Transformer Flow Distillation - Program
 
-## Sintesi
+## Goal
 
-Costruire una repo locale leggera, non un fork, in `src/loopdistill/`, con stack `uv` + Hydra + Lightning. La suite deve generare traiettorie teacher da Attractor, Parcae e Ouro, salvarle in shard Torch, e addestrare studenti piccoli solo sui latenti loopati con loss FM, endpoint/logit, ricostruzione, stabilità, poi MeanFlow/Shortcut/FlowMap/DEQ.
+Build a lightweight, local distillation suite for Solve The Loop / Attractor-style looped transformers. The current P0 path distills only the recurrent loop dynamics: the teacher backbone and original LM head stay available, while a small `StudentFlowModel` learns to map loop latents with flow-matching-style supervision.
 
-Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026/05/06/flow-maps.html), [TorchCFM](https://github.com/atong01/conditional-flow-matching), [TorchDEQ](https://github.com/locuslab/torchdeq), [Gsunshine/meanflow](https://github.com/Gsunshine/meanflow), [Gsunshine/py-meanflow](https://github.com/Gsunshine/py-meanflow), [Lyy-iiis/pMF](https://github.com/Lyy-iiis/pMF), [Attractor](https://github.com/jacobfa/Attractor), [Parcae](https://github.com/sandyresearch/parcae), [Ouro HF collection](https://huggingface.co/collections/ByteDance/ouro).
+This file is the handoff document for agents joining the project. It should stay forward-looking and operational: current state, active experiments, useful entry points, and next decisions. It is not a timestamped journal.
 
-## Stato Attuale
+## Current Repo State
 
-- [x] P0.1 repo skeleton: `uv`, Hydra, Lightning, Rich logging, output standard e smoke tests locali.
-  Postmortem: la suite gira end-to-end con teacher mock e `uv run pytest`.
-- [x] P0 dataset/shard core: `TrajectoryRecord`, shard `.pt`, manifest `.jsonl`, collator mask-aware e `TrajectoryDataModule`.
-  Postmortem: roundtrip e Lightning smoke test coprono shape `[B,K+1,L,D]` e padding variabile.
-- [x] P0 student/loss core: `StudentFlowModel`, FM lineare, endpoint KL opzionale, latent reconstruction e stability.
-  Postmortem: scientificamente ancora mock-only, ma la forma del training loop e dei logging file e' pronta.
-- [x] P1 modules iniziali: MeanFlow JVP, Shortcut consistency e wrapper TorchDEQ come moduli riusabili.
-  Postmortem: presenti come building block, non ancora collegati a run scientifici.
-- [x] P0.2 smoke reale: estrazione traiettorie Attractor da FineWeb-Edu su Blackwell.
-  Postmortem: `attractor-140m` produce shard reali con latenti `z_0...z_K`; smoke verificato su 2 sample, `seq_len=16`, `K=2`.
-- [x] P0.3 smoke reale: training baseline su traiettorie Attractor.
-  Postmortem: training GPU 1 epoca/2 batch completato con `FM + reconstruction + stability`; metriche locali scritte.
-- [x] P0.5 smoke live teacher: training senza shard latenti, con Attractor chiamato nel training step.
-  Postmortem: live smoke su Blackwell completato; il teacher non entra nell'optimizer, output solo in `outputs/live_distill/...`.
-- [x] P0.6 eval quality endpoint: metriche KL/NLL/PPL/top-k su logits finali teacher/student.
-  Postmortem: `eval_quality` e' separato dalla loss; validation resta leggera, quality gira ogni N epoch o in test quando abilitata. Nei run live Attractor ora valuta sia `student_head` sia `teacher_head`.
-- [ ] P0.7 baseline piccola riproducibile: estrazione offline o live su 1k/128 token, `K=8`, training breve e report.
-  Mancante: run non-smoke con subset sufficiente, metriche confrontabili e curve.
+- GitHub repo: `CerovazS/looped-transformer-distillation`, branch `main`.
+- Local HEAD at last update: `29ae085` (`Pin torch for CUDA 12.8 pods`).
+- Recent important commits:
+  - `076e0a0 Add teacher-head quality evaluation`
+  - `29ae085 Pin torch for CUDA 12.8 pods`
+- Stack: `uv` + Hydra + Lightning + Rich logging.
+- Required output layout: `outputs/<pipeline>/<run_id>/{artifacts,metrics,plots,reports}`.
+- Every run must use a unique `run_id`; never overwrite old metrics, checkpoints, logs, or reports.
+- Git identity before commits/pushes must be:
+  - `Luca Cerovaz <204510867+CerovazS@users.noreply.github.com>`
+  - no agent attribution in commits, tags, PRs, or generated text.
 
-## Ambiente Blackwell Attivo
+## Scientific Setup
 
-- Pod RunPod: `runpod-blackwell-stl` / `runpod-stl`.
-- GPU: `2x NVIDIA RTX PRO 6000 Blackwell Server Edition`, circa 94 GiB ciascuna.
-- Repo remota: `/workspace/looped-transformer-distillation`.
-- Repo Attractor remota: `/workspace/external/Attractor`.
-- Checkpoint remoti: `/workspace/external/models/attractor-140m`, `/workspace/external/models/attractor-370m`, `/workspace/external/models/attractor-770m`.
-- FineWeb-Edu remoto: `/workspace/datasets/fineweb-edu` e cache HF sotto `/workspace/.cache/huggingface`.
+The current baseline is not a full LM compression. It replaces the teacher's looped latent dynamics and then evaluates the resulting final latent through the original teacher head.
 
-## Checklist Attiva
+- Teacher primary target: Attractor `140m`.
+- Attractor `140m` config:
+  - total params: `168,053,760`
+  - backbone layers: `7`
+  - loop/fixed-point blocks: `1`
+  - hidden size: `1024`
+  - MLP intermediate size: `4096`
+  - loop block params: `12,587,008`
+  - `max_iter=64`, `min_iter=6`
+- Current student config `blackwell_live_attractor140_p0_full`:
+  - total params: about `20.1M`
+  - dynamics-only params excluding token embedding and logit head: about `3.29M`
+  - no-logit params: about `11.68M`
+- Main metric path for loop replacement:
+  - `tokens -> teacher backbone -> z_0`
+  - `z_0 -> student rollout/flow -> z_K_student`
+  - `z_K_student -> teacher.transformer.ln_f/lm_head -> logits_student`
+  - compare against `z_K_teacher -> teacher head -> logits_teacher`
+- `student_head` metrics are diagnostic only unless `endpoint_kl_weight` or explicit head training is enabled. Current useful quality signal is `teacher_head`.
 
-- [x] Implementare `AttractorTeacher` non-vendored, con caricamento locale da `checkpoint_dir`.
-  Verifica: smoke remoto completato su `attractor-140m` con latenti reali.
-- [x] Estendere `loopdistill-extract` per dataset testuali reali.
-  Verifica: estrazione FineWeb-Edu in shard `.pt` senza sovrascrivere manifest.
-- [x] Aggiungere config Hydra remote/Blackwell per Attractor 140M.
-  Verifica: `experiment=blackwell_attractor140` genera manifest reale su `/workspace`.
-- [x] Allenare baseline minima sullo shard reale.
-  Verifica: `train.csv`, `val.csv`, `test.json` e summary scritti; loss non-NaN su 2 batch.
-- [x] Aggiungere training live teacher.
-  Verifica: `experiment=blackwell_live_attractor140` completa fit/test su batch token-only e non scrive shard latenti.
-- [x] Aggiungere metriche qualità per uso effettivo dello student.
-  Verifica: test locali coprono `KL(logits_student_K, logits_teacher_K)`, NLL/PPL teacher-student-delta, top1 agreement e top-k overlap.
-- [ ] Scalare offline o live smoke a baseline P0 piccola.
-  Verifica: 1k sample, `seq_len=128`, `K=8`, run_id unico, report locale e metriche stabili.
-- [ ] Solo dopo la baseline supervisionata: MeanFlow/Shortcut/DEQ.
-  Verifica: ogni nuova loss deve avere test sintetico prima del run su teacher reale.
+## Implemented Capabilities
 
-## Decisioni Correnti
+- Offline trajectory extraction to Torch shards and `.jsonl` manifests.
+- Live teacher training mode that avoids materializing all intermediate latents.
+- Attractor adapter without vendoring external code.
+- P0 losses:
+  - linear flow matching on teacher latent pairs
+  - latent reconstruction after rollout
+  - stability/fixed-point residual penalty
+  - endpoint KL available but currently off in the main baseline
+- P1 building blocks present but not yet the main baseline:
+  - MeanFlow/JVP loss
+  - Shortcut/compositional consistency
+  - TorchDEQ wrapper
+- Quality evaluation:
+  - `KL(logits_student_K, logits_teacher_K)`
+  - NLL teacher/student/delta
+  - PPL teacher/student/delta
+  - top-1 agreement
+  - top-k overlap
+  - projections: `student_head`, `teacher_head`
 
-- FineWeb-Edu basta per P0: il primo run usa un subset piccolo, non tutto il corpus.
-- Il primo teacher e' `attractor-140m`; `370m/770m` restano P1 per costo e storage.
-- Per P0 non si salvano full logits per ogni depth: sono troppo grandi. Si parte con latenti, residual, solver iters; KL endpoint resta opzionale.
-- Per eval quality servono solo logits finali `K`. Nei run live Attractor il default e' `teacher.return_logits=false`: il target `logits_teacher_K` viene ottenuto proiettando `z_K_teacher`, e il test replacement proietta `z_K_student` con la stessa `teacher_head`. Questo evita full logits dentro `run_batch` e chiarisce che il loop teacher non e' usato nel ramo student.
-- FineWeb-Edu `sample-10BT` espone solo `train`; live validation/test usano slicing HF non sovrapposto (`train[:98%]`, `train[98%:99%]`, `train[99%:]`) invece di riusare lo stesso split.
-- La traiettoria Attractor P0 puo' essere ricostruita richiamando il solver con `max_iter_override=k` per ogni depth richiesto. E' piu' lenta di un hook interno o di `return_trajectory=True`, ma evita patch alla repo esterna.
-- Le sequenze P0 sono fixed length dopo tokenizzazione/troncamento; l'attention mask resta nel formato shard, ma Attractor ignora il padding mask nel backend causale corrente.
-- Offline e live restano due path supportati: offline per debug/riproducibilita' e live per non materializzare tutti i latenti. In live mode il teacher e' chiamato in `torch.no_grad()`, i latenti sono clonati prima della loss, e l'optimizer usa solo `student.parameters()`.
-- Le metriche `val/*` misurano la loss di distillazione frequente; le metriche `eval_quality/*/student_head/*` misurano lo student come LM autonomo, mentre `eval_quality/*/teacher_head/*` misura il replacement dei looped layers con backbone e LM head teacher congelati.
+## Useful Entry Points
 
-## Comandi Verificati Su Blackwell
+- Training CLI: `loopdistill-train`
+  - module: `src/loopdistill/train.py`
+- Offline trajectory extraction CLI: `loopdistill-extract`
+  - module: `src/loopdistill/extract_trajectories.py`
+- Token shard creation CLI: `loopdistill-tokenize`
+  - module: `src/loopdistill/tokenize_text.py`
+- Token shard data path:
+  - `src/loopdistill/data/token_shards.py`
+  - `src/loopdistill/data/datamodule.py`
+- Attractor teacher adapter:
+  - `src/loopdistill/teachers/attractor.py`
+- Student model:
+  - `src/loopdistill/models/student.py`
+- P0 losses:
+  - `src/loopdistill/losses/p0.py`
+- Shortcut and MeanFlow:
+  - `src/loopdistill/losses/shortcut.py`
+  - `src/loopdistill/losses/meanflow.py`
+- Quality metrics:
+  - `src/loopdistill/metrics/quality.py`
+- Main live baseline config:
+  - `configs/experiment/blackwell_live_attractor140_p0_full.yaml`
+- Data config:
+  - `configs/data/token_shards.yaml`
+- Teacher config:
+  - `configs/teacher/attractor.yaml`
+- Eval quality config:
+  - `configs/eval_quality/default.yaml`
 
-Smoke estrazione:
+## Local Verification
+
+Last known local smoke after the Torch pin:
+
+```bash
+uv run pytest tests/test_quality_metrics.py tests/test_live_training.py tests/test_token_shards.py
+```
+
+Expected result from last run: `13 passed`.
+
+## Remote RTX 5090 Handoff
+
+This is a separate single-GPU pod used for sequential baselines. It is not the earlier 2x Blackwell pod.
+
+- SSH:
+  - `ssh root@157.157.221.30 -p 57496 -i ~/.ssh/id_ed25519`
+  - proxy alternative: `ssh -tt cfnijhpgb6n3e7-64411fe1@ssh.runpod.io -i ~/.ssh/id_ed25519`
+- Remote repo:
+  - `/workspace/looped-transformer-distillation`
+- Remote Attractor repo:
+  - `/workspace/external/Attractor`
+- Remote models:
+  - `/workspace/external/models/attractor-140m`
+  - `/workspace/external/models/attractor-370m`
+  - `/workspace/external/models/attractor-770m`
+- Active tmux session at last parent-thread snapshot:
+  - `loopdistill_seq_5090_20260616_200258`
+- Sequential run script:
+  - `/tmp/run_loopdistill_seq_5090.sh`
+- Logs:
+  - `/workspace/loopdistill_logs`
+
+### RTX 5090 Environment Workaround
+
+The RTX 5090 pod has system Torch `2.8.0+cu128`. Torch `2.12.0` failed with the CUDA 12.8 driver, so the repo pins `torch==2.8.0`.
+
+Use a system-site-packages venv and call Python directly:
 
 ```bash
 cd /workspace/looped-transformer-distillation
-RUN_ID=smoke_attractor_$(date -u +%Y%m%d_%H%M%S)
-uv run loopdistill-extract \
-  teacher=attractor \
-  experiment=blackwell_attractor140 \
-  run_id=$RUN_ID \
-  paths.manifest_path=outputs/trajectories/$RUN_ID/manifest.jsonl \
-  extraction.num_samples=2 \
-  extraction.batch_size=1 \
-  extraction.seq_len=16 \
-  'extraction.depths=[0,1,2]' \
-  teacher.max_depth=2
+uv venv /tmp/loopdistill-venv --system-site-packages --python /usr/local/bin/python
+
+UV_PROJECT_ENVIRONMENT=/tmp/loopdistill-venv uv sync --extra dev --inexact \
+  --no-install-package torch \
+  --no-install-package torchvision \
+  --no-install-package triton \
+  --no-install-package nvidia-cublas-cu12 \
+  --no-install-package nvidia-cuda-cupti-cu12 \
+  --no-install-package nvidia-cuda-nvrtc-cu12 \
+  --no-install-package nvidia-cuda-runtime-cu12 \
+  --no-install-package nvidia-cudnn-cu12 \
+  --no-install-package nvidia-cufft-cu12 \
+  --no-install-package nvidia-cufile-cu12 \
+  --no-install-package nvidia-curand-cu12 \
+  --no-install-package nvidia-cusolver-cu12 \
+  --no-install-package nvidia-cusparse-cu12 \
+  --no-install-package nvidia-cusparselt-cu12 \
+  --no-install-package nvidia-nccl-cu12 \
+  --no-install-package nvidia-nvjitlink-cu12 \
+  --no-install-package nvidia-nvtx-cu12
 ```
 
-Smoke training:
+Then run with:
+
+```bash
+export PYTHONPATH=src
+/tmp/loopdistill-venv/bin/python -m loopdistill.train ...
+```
+
+Do not use `uv run` on this pod after the workaround; it may try to install skipped CUDA wheel packages again.
+
+## Data Assets
+
+Large token shard root on the RTX 5090 pod:
+
+```text
+/workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n262144_v8192_t8192
+```
+
+Shard status:
+
+- `train.pt`: shape `(195799, 512)`, int32 tokens, bool attention mask.
+- `val.pt`: shape `(8192, 512)`, int32 tokens, bool attention mask.
+- `test.pt`: shape `(8192, 512)`, int32 tokens, bool attention mask.
+- Verified split hygiene:
+  - zero duplicates within each split
+  - zero row-hash overlap between train/val/test
+
+Smaller shard also exists for quick checks:
+
+```text
+/workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048
+```
+
+## Active Experiments
+
+These were launched from the parent thread on the RTX 5090 pod. Treat this section as last-known state and refresh it before making decisions.
+
+### Run 1: K8 Target, Student 8 Steps
+
+- Run id: `rtx5090_p0_attractor140_k8s8_s512_e15_20260616_200258`
+- Status: completed in the parent thread.
+- Output:
+  - `/workspace/looped-transformer-distillation/outputs/live_distill/rtx5090_p0_attractor140_k8s8_s512_e15_20260616_200258`
+- Setup:
+  - target depth `K=8`
+  - student rollout steps `8`
+  - `seq_len=512`
+  - batch size `16`
+  - `15` epochs
+  - train limit `1024` batches
+  - val limit `64` batches
+  - test limit `128` batches
+- Final known test metrics:
+  - `test/loss`: `138.39463806152344`
+  - `test/loss_fm`: `110.99850463867188`
+  - `test/loss_latent_reconstruction`: `27.39617347717285`
+  - `eval_quality/test/teacher_head/kl_student_teacher`: `0.00040682722465135157`
+  - `eval_quality/test/teacher_head/nll_teacher`: `3.1544244289398193`
+  - `eval_quality/test/teacher_head/nll_student`: `3.1545722484588623`
+  - `eval_quality/test/teacher_head/nll_delta`: `0.0001477748155593872`
+  - `eval_quality/test/teacher_head/ppl_teacher`: `23.96455192565918`
+  - `eval_quality/test/teacher_head/ppl_student`: `23.968168258666992`
+  - `eval_quality/test/teacher_head/ppl_delta`: `0.003619670867919922`
+  - `eval_quality/test/teacher_head/top1_agreement`: `0.9877872467041016`
+  - `eval_quality/test/teacher_head/top5_overlap`: `0.9875877499580383`
+- Interpretation:
+  - The teacher-head replacement path works very well for K8/8.
+  - The `student_head` path remains bad because the student LM head is not the trained objective.
+
+### Run 2: K16 Target, Student 16 Steps
+
+- Run id: `rtx5090_p0_attractor140_k16s16_s512_e15_20260616_213245`
+- Status at last parent-thread snapshot: in progress.
+- Setup:
+  - target depth `K=16`
+  - student rollout steps `16`
+  - `seq_len=512`
+  - batch size `8`
+  - `15` epochs
+  - train limit `512` batches
+  - val limit `64` batches
+  - test limit `128` batches
+- Last known epoch 3 metrics:
+  - train loss: `299.9974`
+  - val loss: `235.0574`
+  - `eval_quality/val/teacher_head/kl_student_teacher`: `0.0006543`
+  - `eval_quality/val/teacher_head/nll_teacher`: `3.131119`
+  - `eval_quality/val/teacher_head/nll_student`: `3.131421`
+  - `eval_quality/val/teacher_head/nll_delta`: `0.000302`
+  - `eval_quality/val/teacher_head/ppl_delta`: `0.00744`
+  - `eval_quality/val/teacher_head/top1_agreement`: `0.9834785`
+  - `eval_quality/val/teacher_head/top5_overlap`: `0.9831184`
+- Trend:
+  - improving from epoch 0; not yet as good as K8/8 at the last snapshot.
+
+### Run 3: K16 Target, Student 8 Steps
+
+- Run id pattern: `rtx5090_p0_attractor140_k16s8_s512_e15_<timestamp>`
+- Status at last parent-thread snapshot: planned third run in the same tmux script, likely not started yet.
+- Setup:
+  - target depth `K=16`
+  - student rollout steps `8`
+  - `seq_len=512`
+  - batch size `8`
+  - `15` epochs
+  - train limit `512` batches
+  - val limit `64` batches
+  - test limit `128` batches
+- Scientific purpose:
+  - test actual inference-step compression: match a deeper teacher endpoint with fewer student integration steps.
+
+## Monitoring Commands
+
+Read the current tmux state:
+
+```bash
+ssh root@157.157.221.30 -p 57496 -i ~/.ssh/id_ed25519 \
+  'tmux capture-pane -pt loopdistill_seq_5090_20260616_200258 -S -80'
+```
+
+Check GPU:
+
+```bash
+ssh root@157.157.221.30 -p 57496 -i ~/.ssh/id_ed25519 \
+  'nvidia-smi'
+```
+
+List live distillation outputs:
+
+```bash
+ssh root@157.157.221.30 -p 57496 -i ~/.ssh/id_ed25519 \
+  'ls -lt /workspace/looped-transformer-distillation/outputs/live_distill | head'
+```
+
+Inspect final test metrics for a run:
+
+```bash
+ssh root@157.157.221.30 -p 57496 -i ~/.ssh/id_ed25519 \
+  'python -m json.tool /workspace/looped-transformer-distillation/outputs/live_distill/<run_id>/metrics/test.json | head -120'
+```
+
+## Useful Training Command Pattern
 
 ```bash
 cd /workspace/looped-transformer-distillation
-MANIFEST=outputs/trajectories/<smoke_run_id>/manifest.jsonl
-RUN_ID=train_smoke_attractor_$(date -u +%Y%m%d_%H%M%S)
-uv run loopdistill-train \
-  experiment=blackwell_attractor140 \
-  paths.manifest_path=$MANIFEST \
-  output_dir=outputs/loopdistill/$RUN_ID \
-  data.batch_size=1 \
-  student.hidden_dim=128 \
-  student.num_layers=1 \
-  trainer.max_epochs=1 \
-  trainer.limit_train_batches=2 \
-  trainer.limit_val_batches=1 \
-  trainer.limit_test_batches=1 \
-  trainer.enable_checkpointing=false
+export PYTHONPATH=src
+PY=/tmp/loopdistill-venv/bin/python
+DATA_ROOT=/workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n262144_v8192_t8192
+
+"$PY" -m loopdistill.train \
+  experiment=blackwell_live_attractor140_p0_full \
+  data.train_path=${DATA_ROOT}/train.pt \
+  data.val_path=${DATA_ROOT}/val.pt \
+  data.test_path=${DATA_ROOT}/test.pt \
+  data.num_workers=2 \
+  data.pin_memory=true \
+  trainer.devices=1 \
+  trainer.strategy=auto \
+  trainer.max_epochs=15 \
+  trainer.limit_val_batches=64 \
+  trainer.limit_test_batches=128 \
+  trainer.enable_checkpointing=true \
+  trainer.log_every_n_steps=25 \
+  eval_quality.every_n_epochs=1 \
+  eval_quality.run_on_test=true \
+  teacher.return_logits=false \
+  run_id=<unique_run_id> \
+  output_dir=outputs/live_distill/<unique_run_id> \
+  data.batch_size=<16_or_8> \
+  trainer.limit_train_batches=<1024_or_512> \
+  'live.depths=[0,1,2,3,4,5,6,7,8]' \
+  teacher.max_depth=8 \
+  loss.rollout_steps=8 \
+  eval_quality.rollout_steps=8
 ```
 
-Smoke live teacher:
+For K16 use depths `[0,...,16]`, `teacher.max_depth=16`, and rollout steps `16` or `8` depending on the experiment.
 
-```bash
-cd /workspace/looped-transformer-distillation
-RUN_ID=live_smoke_attractor_$(date -u +%Y%m%d_%H%M%S)
-uv run loopdistill-train \
-  experiment=blackwell_live_attractor140 \
-  run_id=$RUN_ID \
-  output_dir=outputs/live_distill/$RUN_ID
-```
+## Next Decisions
 
-Nota: se FineWeb-Edu non e' ancora materializzato nella cache Arrow di `datasets`, il primo live run puo' spendere circa 1-2 minuti a generare lo split `sample-10BT` dalla cache parquet. I run successivi riusano la cache.
+- Refresh the RTX 5090 run state before launching anything new.
+- Compare K8/8, K16/16, and K16/8 using the `teacher_head` metrics, not `student_head`.
+- If K16/8 degrades materially, prioritize Shortcut/compositional loss before MeanFlow; it directly targets fewer-step composition.
+- Decide whether to train a student LM head. If yes, turn endpoint/logit KL back on and judge `student_head`; otherwise keep using `teacher_head` as the primary replacement metric.
+- Add plot generation for:
+  - `plots/loss_curves.png`
+  - `plots/nfe_quality.png`
+  Current local metrics are machine-readable, but the output standard expects at least one visual artifact for non-trivial runs.
+- Consider adding a clean `data.max_train_samples` or shard subsetting option rather than relying only on `trainer.limit_train_batches` for small baselines.
+- After the three RTX 5090 baselines finish, the next scientific branch should be one of:
+  - longer K16 training if K16/16 is still improving
+  - Shortcut/compositional K16 target with 8 student steps
+  - MeanFlow/iMF only after the supervised flow baseline is stable
 
-## Architettura Della Repo
+## Do Not Break
 
-- `pyproject.toml`: gestito solo con `uv`; dipendenze P0: `torch`, `lightning`, `hydra-core`, `omegaconf`, `transformers`, `datasets`, `safetensors`, `torchmetrics`, `rich`, `jsonlines`, `numpy`, `einops`, `torchcfm`, `torchdiffeq`, `torchdeq`. Extra A100: `flash-attn`/FA2 dove compatibile.
-- `configs/`: Hydra con gruppi `teacher`, `student`, `data`, `loss`, `trainer`, `experiment`. Ogni oggetto istanziabile usa `_target_`.
-- `src/loopdistill/data/`: manifest, shard loader, collator mask-aware, Lightning `TrajectoryDataModule`.
-- `src/loopdistill/teachers/`: adapter read-only per teacher esterni, senza vendoring: `AttractorTeacher`, `ParcaeTeacher`, `OuroTeacher`, poi `LoopFormerTeacher`.
-- `src/loopdistill/models/`: `StudentFlowModel`, time/interval embeddings, latent transformer block, heads `velocity`, `flow_map`, opzionale `logit_head`.
-- `src/loopdistill/losses/`: FM lineare P0, endpoint/logit KL, latent reconstruction, stability, poi MeanFlow, Shortcut, FlowMap PSD/LSD, C-DEQ.
-- `src/loopdistill/metrics/`: `QualityEvaluator` per KL endpoint, NLL/PPL teacher-student-delta, top1 agreement e top-k overlap.
-- `src/loopdistill/train.py`: entrypoint Hydra + Lightning.
-- `src/loopdistill/extract_trajectories.py`: estrazione teacher offline, sempre in output directory unica.
-- `outputs/<pipeline>/<run_id>/`: `artifacts/`, `metrics/`, `plots/`, `reports/`, con CSV/JSON locali obbligatori.
-
-## Interfacce Pubbliche
-
-- `TrajectoryRecord`: unità logica descritta nel manifest `.jsonl`.
-  Campi: `sample_id`, `teacher_id`, `teacher_repo`, `teacher_ckpt`, `tokenizer_id`, `dataset_id`, `split`, `shard_path`, `row`, `seq_len`, `K`, `dtype`, `latent_shape`, `logit_shape`, `metadata`.
-
-- Shard P0: `.pt` con dizionario tensoriale.
-  Campi obbligatori: `tokens`, `attention_mask`, `teacher_id`, `K`, `z` con shape `[K+1, L, D]`, `logits` con shape `[K+1, L, V]` oppure top-k compresso, `loss_K`, `residual_norm`, `solver_iters`.
-  Default P0: shard `.pt` + manifest `.jsonl`; `zarr` diventa P1 se gli shard diventano troppo grandi.
-
-- `TeacherRunner`:
-  `run_batch(tokens, attention_mask, depths: list[int]) -> TrajectoryBatch`.
-  Deve restituire latenti loopati normalizzati, logits per depth, residual norm e solver iterations se disponibili. Ouro usa `transformers` e `config.total_ut_steps`; Attractor/Parcae usano adapter repo-specifici.
-
-- `StudentFlowModel`:
-  `forward(z_t, t, delta, tokens=None, attention_mask=None, context=None, mode="velocity") -> StudentOutput`.
-  Output: `velocity`, opzionale `z_next`, opzionale `avg_velocity`, opzionale `logits`.
-
-- `LossModule`:
-  `compute(batch, student, loss_cfg) -> dict[str, Tensor]`, con ritorno sempre scalari loggabili e metriche diagnostiche.
-
-- `QualityEvaluator`:
-  `compute(batch, student, teacher=None) -> dict[str, Tensor]`, richiede `z`, `tokens`, `attention_mask` e logits teacher finali da batch oppure `teacher.project_logits(z_K_teacher)`. Esegue rollout student fino a `z_K_student`, poi puo' misurare `student_head`, `teacher_head`, o entrambe.
-
-## Loss E Metodi
-
-- P0 FM lineare: campiona coppie teacher `(a,b)` dalla traiettoria, interpola `z_t = (1-s) z_a + s z_b`, target `v = (z_b - z_a)/(t_b - t_a)`, loss masked MSE su latenti.
-- P0 endpoint/logit: KL temperatura-scalata tra logits student endpoint e `logits_K`; supportare full logits o top-k compresso.
-- P0 eval quality: non ottimizza. Misura due projection path quando configurato: `student_head` (`z_K_student -> student.logit_head`) e `teacher_head` (`z_K_student -> teacher.ln_f/lm_head`). Per ciascun path registra `KL(logits_student_K, logits_teacher_K)`, `NLL teacher`, `NLL student`, `NLL delta`, `PPL teacher`, `PPL student`, `PPL delta`, `top1 agreement`, `top-k overlap`.
-- P0 latent reconstruction: rollout student fino a `K` e MSE masked contro `z_K`.
-- P0 stability: se esiste una mappa `F`, penalizzare `||F(z_K)-z_K||`; per DEQ/Attractor usare anche residual teacher quando disponibile.
-- P1 MeanFlow: port PyTorch locale della formula MeanFlow con `torch.func.jvp`; default autocast off nel JVP, target detach, fallback finite-difference.
-- P1 Shortcut/compositional: `F(z,t,d) ≈ F(F(z,t,d/2), t+d/2, d/2)`, con stop-gradient sul target composto.
-- P1 FlowMap: Lagrangiana = supervisione diretta tra stati teacher; Euleriana = vincoli via JVP/derivata spaziale; PSD/LSD come self-distillation progressiva.
-- P1 DEQ/C-DEQ: wrapper `DEQLatentLoop` intorno a `torchdeq.get_deq`, log di `abs_trace`, `rel_trace`, `nstep`, `sradius`; default `hook_ift=False`, solver `fixed_point_iter` o Anderson limitato.
-- P2 OT-CFM/SB-CFM: usare `torchcfm` solo per matcher e OT sampler; OT su `[B,L,D]` passa da pooling/masked cost, non flatten cieco come default.
-
-## Connessione Con Le Repo Esterne
-
-- TorchCFM: dipendenza P0 per `ConditionalFlowMatcher`; non importare `runner/`, UNet o vecchio Lightning. Usare `OTPlanSampler` solo P1/P2.
-- TorchDEQ: dipendenza P1 per solver e implicit differentiation; incapsulare in moduli nostri Hydra/Lightning.
-- MeanFlow/pMF: non dipendere dai repo JAX/TPU; portare solo formule, sampler `t,r`, adaptive weighting, dual-head `u/v`. pMF PyTorch è inference-only, quindi solo riferimento.
-- Attractor/Parcae/Ouro: non forkare. Adapter sottili che caricano checkpoint/tokenizer e registrano hook sui loop states.
-- Ouro: usare HF `ByteDance/Ouro-*`; passare sempre `HF_TOKEN` esplicitamente. P0 supporta full recurrent steps; adaptive exit è P1.
-
-## A100/FlashAttention2
-
-- Training standard: `bf16-mixed`, `attn_implementation="flash_attention_2"` per modelli HF compatibili, gradient checkpointing configurabile.
-- JVP MeanFlow: disabilitare FA2/SDPA fused se incompatibile; eseguire JVP in fp32 o autocast off.
-- DDP: test esplicito per `torch.func.jvp`; se DDP rompe, usare path `model.module` con sincronizzazione o fallback finite-difference.
-- Log obbligatori: wall-clock, max CUDA memory, NFE/loop count, batch effective tokens.
-
-## Metriche E Output Attesi
-
-- Metriche: latent MSE per depth, logit KL, NLL/PPL teacher-student-delta, top1 agreement, top-k overlap, downstream accuracy, NFE/loop vs quality, fixed-point residual, solver steps, latency, memory peak.
-- File locali: `metrics/train.csv`, `metrics/val.csv`, `metrics/test.json`, `reports/run_summary.md`, `plots/loss_curves.png`, `plots/nfe_quality.png`, `artifacts/config_resolved.yaml`.
-- Ogni run ha `run_id` unico; nessun overwrite di shard, metriche, checkpoint o report.
-
-## Roadmap
-
-- P0.1 Repo skeleton: `uv`, Hydra, Lightning, Rich logging, output standard, unit test smoke.
-- P0.2 Trajectory extraction: Attractor e Parcae prima, Ouro HF subito dopo; shard `.pt` + manifest.
-- P0.3 Student baseline: small latent transformer con time/delta embeddings e FA2 dove possibile.
-- P0.4 Training baseline: FM lineare + KL endpoint + latent reconstruction + stability, validazione e report locali.
-- P0.5 Quality eval: logits finali teacher/student, next-token NLL/PPL e top-k agreement su validation/test held-out.
-- P1.1 MeanFlow/iMF: JVP loss, dual-head `u/v`, adaptive weighting, finite-difference fallback.
-- P1.2 Compositional/Shortcut: consistency su salti multipli e curva NFE/quality.
-- P1.3 DEQ/C-DEQ: TorchDEQ wrapper, solver metrics, residual-aware distillation.
-- P1.4 OT/SB/FlowMap: TorchCFM OT ablations, PSD/LSD, Eulerian/Lagrangian variants.
-- P2 Scaling: zarr storage, multi-node A100, Ouro adaptive exit, LT2/MELT-style memory experiments.
-
-## Test Plan
-
-- Unit: manifest parsing, shard roundtrip, mask-aware MSE/KL, shape `[B,L,D]`, variable length.
-- Teacher smoke: ogni adapter produce `z[0..K]`, logits, tokenizer metadata e non cambia modello in training mode.
-- Loss tests: FM target esatto su traiettoria lineare; MeanFlow JVP confrontato con finite difference su MLP piccolo; Shortcut loss zero su mappa lineare perfetta.
-- Lightning smoke: 2 batch train/val CPU e 2 batch CUDA bf16.
-- Quality metrics: test deterministici per KL/NLL/PPL/top1/top-k e verifica che `eval_quality/val/*` finisca in `metrics/val.csv`.
-- A100 smoke: FA2 forward/backward, poi MeanFlow JVP con FA2 disattivabile.
-- Regression: nessun run sovrascrive output precedenti; metriche CSV/JSON sempre presenti.
-
-## Assunzioni E Default
-
-- Default storage P0: shard `.pt`, non zarr.
-- Default teacher P0: Attractor + Parcae; Ouro HF entra nello stesso milestone se il caricamento `transformers` espone gli stati loopati con hook puliti.
-- Default path scientifico: prima distillazione supervisionata da traiettorie teacher, poi MeanFlow/Shortcut/DEQ. Questo riduce rischio rispetto a partire subito con JVP e solver impliciti.
-- Default commerciale/licenza: copiare solo codice MIT quando necessario; repo CC BY-NC-SA o senza licenza sono riferimento, non sorgente di codice.
+- Do not vendor Attractor, Parcae, or Ouro into this repo.
+- Do not materialize all intermediate activations unless the run explicitly needs offline shards.
+- Do not judge loop replacement quality from the untrained `student_head`.
+- Do not run new experiments into an existing output directory.
+- Do not use `uv pip install`; use `uv add` for dependency changes.
+- Do not use `uv run` on the RTX 5090 workaround environment.
+- Always pass `HF_TOKEN` explicitly when using gated HuggingFace assets.
+- Keep `program.md` forward-looking; durable experiment results belong in run outputs and Flywheel nodes.
