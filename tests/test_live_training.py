@@ -182,7 +182,7 @@ def test_hydra_full_live_experiment_uses_ddp_and_k8():
         cfg = compose(config_name="config", overrides=["experiment=blackwell_live_attractor140_p0_full"])
 
     assert cfg.trainer.devices == 2
-    assert cfg.trainer.strategy == "ddp"
+    assert cfg.trainer.strategy == "ddp_fork"
     assert cfg.live.depths == list(range(9))
     assert cfg.loss.rollout_steps == 8
     assert len({cfg.data.train_split, cfg.data.val_split, cfg.data.test_split}) == 3
