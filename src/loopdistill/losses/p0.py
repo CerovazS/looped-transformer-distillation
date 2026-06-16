@@ -17,6 +17,7 @@ class LoopDistillationLoss(nn.Module):
         stability_weight: float = 0.05,
         temperature: float = 2.0,
         rollout_steps: int | None = None,
+        rollout_mode: str = "velocity",
         mask_value: int = 0,
     ):
         super().__init__()
@@ -26,7 +27,10 @@ class LoopDistillationLoss(nn.Module):
         self.stability_weight = stability_weight
         self.temperature = temperature
         self.rollout_steps = rollout_steps
+        self.rollout_mode = rollout_mode
         self.mask_value = mask_value
+        if self.rollout_mode not in {"velocity", "flow_map", "avg_velocity"}:
+            raise ValueError("rollout_mode must be one of: velocity, flow_map, avg_velocity.")
 
     def _sample_pairs(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch, depth, _, _ = z.shape
@@ -50,8 +54,18 @@ class LoopDistillationLoss(nn.Module):
         for step in range(steps):
             t = torch.full((z.shape[0],), step / max(steps, 1), device=z.device, dtype=z.dtype)
             delta = torch.full((z.shape[0],), 1.0 / max(steps, 1), device=z.device, dtype=z.dtype)
-            out = student(z, t, delta, tokens=tokens, attention_mask=mask, mode="velocity")
-            z = z + delta.reshape(-1, 1, 1) * out.velocity
+            mode = "flow_map" if self.rollout_mode in {"flow_map", "avg_velocity"} else "velocity"
+            out = student(z, t, delta, tokens=tokens, attention_mask=mask, mode=mode)
+            if self.rollout_mode == "flow_map":
+                if out.z_next is None:
+                    raise ValueError("rollout_mode='flow_map' requires student output z_next.")
+                z = out.z_next
+            elif self.rollout_mode == "avg_velocity":
+                if out.avg_velocity is None:
+                    raise ValueError("rollout_mode='avg_velocity' requires student output avg_velocity.")
+                z = z + delta.reshape(-1, 1, 1) * out.avg_velocity
+            else:
+                z = z + delta.reshape(-1, 1, 1) * out.velocity
         return z
 
     def compute(self, batch: dict[str, Any], student: nn.Module) -> dict[str, torch.Tensor]:

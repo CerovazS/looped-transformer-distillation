@@ -6,6 +6,11 @@ from hydra import compose, initialize_config_dir
 from pathlib import Path
 from torch.utils.data import DataLoader
 
+from loopdistill.losses.flowmap import (
+    CompositionalFlowMapLoss,
+    EulerianMeanFlowTrajectoryLoss,
+    LagrangianFlowMapLoss,
+)
 from loopdistill.losses.p0 import LoopDistillationLoss
 from loopdistill.metrics.quality import QualityEvaluator
 from loopdistill.models.student import StudentFlowModel
@@ -39,6 +44,39 @@ def test_live_teacher_step_from_token_batch_backward():
 
     assert torch.isfinite(loss)
     assert any(param.grad is not None for param in student.parameters())
+
+
+def test_live_teacher_step_with_flow_map_losses_backward():
+    loss_modules = [
+        LagrangianFlowMapLoss(),
+        CompositionalFlowMapLoss(),
+        EulerianMeanFlowTrajectoryLoss(),
+    ]
+    for loss_module in loss_modules:
+        student = StudentFlowModel(
+            latent_dim=8,
+            hidden_dim=32,
+            num_layers=1,
+            num_heads=4,
+            vocab_size=16,
+        )
+        teacher = MockTeacher(latent_dim=8, vocab_size=16, max_depth=2)
+        module = DistillationModule(
+            student=student,
+            loss_module=loss_module,
+            teacher=teacher,
+            live_depths=[0, 1, 2],
+        )
+        batch = {
+            "tokens": torch.randint(0, 16, (2, 5)),
+            "attention_mask": torch.ones(2, 5, dtype=torch.bool),
+        }
+
+        loss = module._step(batch, "train")
+        loss.backward()
+
+        assert torch.isfinite(loss)
+        assert any(param.grad is not None for param in student.parameters())
 
 
 def test_live_optimizer_uses_student_parameters_only():
@@ -237,7 +275,35 @@ def test_hydra_full_live_experiment_uses_ddp_and_k8():
     assert cfg.trainer.strategy == "ddp_find_unused_parameters_true"
     assert cfg.live.depths == list(range(9))
     assert cfg.loss.rollout_steps == 8
+    assert cfg.loss.rollout_mode == "velocity"
     assert cfg.teacher.return_logits is False
     assert cfg.eval_quality.projections == ["student_head", "teacher_head"]
+    assert cfg.eval_quality.rollout_mode == "velocity"
     assert cfg.data._target_ == "loopdistill.data.token_shards.TokenShardDataModule"
     assert len({cfg.tokenization.train_split, cfg.tokenization.val_split, cfg.tokenization.test_split}) == 3
+
+
+def test_hydra_flow_map_loss_configs_compose():
+    config_dir = str((Path(__file__).resolve().parents[1] / "configs").resolve())
+    expected_targets = {
+        "compositional": "loopdistill.losses.flowmap.CompositionalFlowMapLoss",
+        "lagrangian": "loopdistill.losses.flowmap.LagrangianFlowMapLoss",
+        "eulerian_meanflow": "loopdistill.losses.flowmap.EulerianMeanFlowTrajectoryLoss",
+    }
+    for loss_name, target in expected_targets.items():
+        with initialize_config_dir(version_base=None, config_dir=config_dir):
+            cfg = compose(config_name="config", overrides=[f"loss={loss_name}"])
+        assert cfg.loss._target_ == target
+
+
+def test_hydra_compositional_k16s8_experiment_compose():
+    config_dir = str((Path(__file__).resolve().parents[1] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(config_name="config", overrides=["experiment=blackwell_live_attractor140_compositional_k16s8"])
+
+    assert cfg.loss._target_ == "loopdistill.losses.flowmap.CompositionalFlowMapLoss"
+    assert cfg.live.depths == list(range(17))
+    assert cfg.teacher.max_depth == 16
+    assert cfg.eval_quality.rollout_steps == 8
+    assert cfg.eval_quality.rollout_mode == "flow_map"
+    assert cfg.data.batch_size == 8

@@ -29,6 +29,17 @@ class FixedProjectionTeacher:
         return self.logits.to(device=z.device)
 
 
+class ModeStepStudent(nn.Module):
+    def forward(self, z_t, t, delta, **kwargs):
+        ones = torch.ones_like(z_t)
+        return StudentOutput(
+            velocity=ones,
+            z_next=z_t + 2.0 * delta.reshape(-1, 1, 1) * ones,
+            avg_velocity=3.0 * ones,
+            logits=torch.zeros(z_t.shape[0], z_t.shape[1], 4, device=z_t.device),
+        )
+
+
 def test_quality_metrics_identical_logits():
     logits = torch.tensor(
         [
@@ -110,3 +121,21 @@ def test_quality_metrics_can_compare_student_and_teacher_heads():
     assert metrics["student_head/nll_student"] > metrics["student_head/nll_teacher"]
     assert torch.isclose(metrics["teacher_head/nll_delta"], torch.zeros(()), atol=1e-6)
     assert torch.isclose(metrics["teacher_head/top1_agreement"], torch.ones(()))
+
+
+def test_quality_rollout_modes_select_expected_student_head():
+    batch = {
+        "tokens": torch.tensor([[0, 1, 2]]),
+        "attention_mask": torch.ones(1, 3, dtype=torch.bool),
+        "z": torch.zeros(1, 2, 3, 4),
+        "logits": torch.zeros(1, 1, 3, 4),
+    }
+    student = ModeStepStudent()
+
+    velocity_z = QualityEvaluator(enabled=True, rollout_steps=1, rollout_mode="velocity")._rollout(student, batch)
+    flow_map_z = QualityEvaluator(enabled=True, rollout_steps=1, rollout_mode="flow_map")._rollout(student, batch)
+    avg_velocity_z = QualityEvaluator(enabled=True, rollout_steps=1, rollout_mode="avg_velocity")._rollout(student, batch)
+
+    assert torch.allclose(velocity_z, torch.ones_like(velocity_z))
+    assert torch.allclose(flow_map_z, torch.full_like(flow_map_z, 2.0))
+    assert torch.allclose(avg_velocity_z, torch.full_like(avg_velocity_z, 3.0))

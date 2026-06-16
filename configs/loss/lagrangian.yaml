@@ -1,0 +1,4 @@
+_target_: loopdistill.losses.flowmap.LagrangianFlowMapLoss
+map_weight: 1.0
+velocity_weight: 0.1
+stability_weight: 0.05

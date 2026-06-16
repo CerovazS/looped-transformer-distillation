@@ -5,4 +5,5 @@ latent_reconstruction_weight: 1.0
 stability_weight: 0.05
 temperature: 2.0
 rollout_steps: null
+rollout_mode: velocity
 mask_value: 0

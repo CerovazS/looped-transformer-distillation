@@ -1,0 +1,5 @@
+_target_: loopdistill.losses.flowmap.CompositionalFlowMapLoss
+supervised_weight: 1.0
+consistency_weight: 1.0
+midpoint_weight: 0.5
+detach_composed_target: true

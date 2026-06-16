@@ -1,0 +1,60 @@
+# @package _global_
+name: blackwell_live_attractor140_compositional_k16s8
+run_id: live_compositional_attractor140_k16s8_s512_${now:%Y%m%d_%H%M%S}
+output_dir: outputs/live_distill/${run_id}
+
+defaults:
+  - override /data: token_shards
+  - override /teacher: attractor
+  - override /loss: compositional
+
+live:
+  enabled: true
+  depths: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+
+student:
+  latent_dim: 1024
+  hidden_dim: 256
+  num_layers: 2
+  num_heads: 8
+  vocab_size: 32768
+  max_seq_len: 2048
+
+eval_quality:
+  enabled: true
+  projections:
+    - student_head
+    - teacher_head
+  top_k: 5
+  temperature: 1.0
+  rollout_steps: 8
+  rollout_mode: flow_map
+  every_n_epochs: 1
+  run_on_test: true
+
+data:
+  train_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/train.pt
+  val_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/val.pt
+  test_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512_n32768_v2048_t2048/test.pt
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+  drop_last: true
+
+teacher:
+  max_depth: 16
+  return_logits: false
+  logit_depths: final
+
+trainer:
+  max_epochs: 2
+  accelerator: gpu
+  devices: 1
+  strategy: auto
+  precision: bf16-mixed
+  accumulate_grad_batches: 1
+  log_every_n_steps: 10
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  enable_checkpointing: false

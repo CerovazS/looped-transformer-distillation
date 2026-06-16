@@ -1,0 +1,9 @@
+_target_: loopdistill.losses.flowmap.EulerianMeanFlowTrajectoryLoss
+avg_velocity_weight: 1.0
+velocity_weight: 0.0
+jvp_weight: 0.0
+norm_eps: 0.01
+norm_p: 1.0
+jvp_autocast_enabled: false
+jvp_fallback: finite_difference
+finite_difference_eps: 0.001

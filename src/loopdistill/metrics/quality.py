@@ -18,6 +18,7 @@ class QualityEvaluator(nn.Module):
         top_k: int = 5,
         temperature: float = 1.0,
         rollout_steps: int | None = None,
+        rollout_mode: str = "velocity",
         every_n_epochs: int = 1,
         run_on_test: bool = True,
         require_logits: bool = True,
@@ -29,11 +30,14 @@ class QualityEvaluator(nn.Module):
         self.top_k = int(top_k)
         self.temperature = float(temperature)
         self.rollout_steps = rollout_steps
+        self.rollout_mode = str(rollout_mode)
         self.every_n_epochs = int(every_n_epochs)
         self.run_on_test = bool(run_on_test)
         self.require_logits = bool(require_logits)
         self.max_ppl_exp = float(max_ppl_exp)
         self.projections = self._normalize_projections(projections)
+        if self.rollout_mode not in {"velocity", "flow_map", "avg_velocity"}:
+            raise ValueError("rollout_mode must be one of: velocity, flow_map, avg_velocity.")
 
     def compute(
         self,
@@ -169,8 +173,18 @@ class QualityEvaluator(nn.Module):
         for step in range(steps):
             t = torch.full((current.shape[0],), step / steps, device=current.device, dtype=current.dtype)
             delta = torch.full((current.shape[0],), 1.0 / steps, device=current.device, dtype=current.dtype)
-            out = student(current, t, delta, tokens=tokens, attention_mask=mask, mode="velocity")
-            current = current + delta.reshape(-1, 1, 1) * out.velocity
+            mode = "flow_map" if self.rollout_mode in {"flow_map", "avg_velocity"} else "velocity"
+            out = student(current, t, delta, tokens=tokens, attention_mask=mask, mode=mode)
+            if self.rollout_mode == "flow_map":
+                if out.z_next is None:
+                    raise ValueError("rollout_mode='flow_map' requires student output z_next.")
+                current = out.z_next
+            elif self.rollout_mode == "avg_velocity":
+                if out.avg_velocity is None:
+                    raise ValueError("rollout_mode='avg_velocity' requires student output avg_velocity.")
+                current = current + delta.reshape(-1, 1, 1) * out.avg_velocity
+            else:
+                current = current + delta.reshape(-1, 1, 1) * out.velocity
         return current
 
     def _next_token_nll(

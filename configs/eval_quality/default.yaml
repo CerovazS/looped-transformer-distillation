@@ -3,6 +3,7 @@ enabled: false
 top_k: 5
 temperature: 1.0
 rollout_steps: null
+rollout_mode: velocity
 every_n_epochs: 1
 run_on_test: true
 require_logits: true
