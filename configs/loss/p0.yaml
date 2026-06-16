@@ -1,0 +1,8 @@
+_target_: loopdistill.losses.p0.LoopDistillationLoss
+fm_weight: 1.0
+endpoint_kl_weight: 0.2
+latent_reconstruction_weight: 1.0
+stability_weight: 0.05
+temperature: 2.0
+rollout_steps: null
+mask_value: 0

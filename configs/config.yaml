@@ -1,0 +1,18 @@
+defaults:
+  - data: trajectory
+  - teacher: mock
+  - student: small
+  - loss: p0
+  - trainer: default
+  - experiment: local
+  - _self_
+
+seed: 17
+run_id: ${now:%Y%m%d_%H%M%S}
+pipeline_name: loopdistill
+output_dir: outputs/${pipeline_name}/${run_id}
+
+paths:
+  manifest_path: outputs/trajectories/mock/manifest.jsonl
+
+mode: train

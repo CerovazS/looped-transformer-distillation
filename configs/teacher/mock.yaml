@@ -1,0 +1,6 @@
+_target_: loopdistill.teachers.mock.MockTeacher
+teacher_id: mock
+latent_dim: 32
+vocab_size: 128
+max_depth: 4
+noise_scale: 0.05

@@ -1,0 +1,7 @@
+_target_: loopdistill.teachers.ouro.OuroTeacher
+model_id: ByteDance/Ouro-1.4B
+teacher_id: ouro-1.4b
+device: auto
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+total_ut_steps: 4

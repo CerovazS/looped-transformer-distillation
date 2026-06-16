@@ -1,0 +1,51 @@
+[project]
+name = "looped-transformer-distillation"
+version = "0.1.0"
+description = "Local suite for flow/DEQ distillation of looped transformer latent trajectories."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "datasets>=3.0.0",
+  "einops>=0.8.0",
+  "hydra-core>=1.3.2",
+  "jsonlines>=4.0.0",
+  "lightning>=2.4.0",
+  "numpy>=1.26.0",
+  "omegaconf>=2.3.0",
+  "rich>=13.7.0",
+  "safetensors>=0.4.5",
+  "torch>=2.4.0",
+  "torchcfm>=1.0.7",
+  "torchdeq>=0.1.0",
+  "torchdiffeq>=0.2.4",
+  "torchmetrics>=1.4.0",
+  "transformers>=4.54.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+]
+a100 = [
+  "flash-attn>=2.6.0",
+]
+
+[project.scripts]
+loopdistill-train = "loopdistill.train:main"
+loopdistill-extract = "loopdistill.extract_trajectories:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/loopdistill"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

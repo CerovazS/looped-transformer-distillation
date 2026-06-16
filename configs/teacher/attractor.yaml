@@ -1,0 +1,7 @@
+_target_: loopdistill.teachers.external.ExternalRepoTeacher
+teacher_id: attractor
+repo_path: null
+module_path: null
+class_name: null
+checkpoint_path: null
+tokenizer_id: null
