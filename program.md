@@ -9,10 +9,11 @@ This file is the handoff document for agents joining the project. It should stay
 ## Current Repo State
 
 - GitHub repo: `CerovazS/looped-transformer-distillation`, branch `main`.
-- Local HEAD at last update: `29ae085` (`Pin torch for CUDA 12.8 pods`).
+- This handoff was first written on top of `29ae085`; use `git rev-parse --short HEAD` for the exact current commit.
 - Recent important commits:
   - `076e0a0 Add teacher-head quality evaluation`
   - `29ae085 Pin torch for CUDA 12.8 pods`
+  - `06ef131 Update program handoff`
 - Stack: `uv` + Hydra + Lightning + Rich logging.
 - Required output layout: `outputs/<pipeline>/<run_id>/{artifacts,metrics,plots,reports}`.
 - Every run must use a unique `run_id`; never overwrite old metrics, checkpoints, logs, or reports.
