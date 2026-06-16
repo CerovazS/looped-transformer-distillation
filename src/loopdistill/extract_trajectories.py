@@ -46,6 +46,7 @@ def _iter_text_batches(cfg: DictConfig, teacher):
     dataset = load_text_dataset(
         dataset_path=_cfg_get(extraction, "dataset_path", None),
         dataset_id=_cfg_get(extraction, "dataset_id", None),
+        dataset_config_name=_cfg_get(extraction, "dataset_config_name", None),
         split=str(_cfg_get(extraction, "split", "train")),
         cache_dir=_cfg_get(extraction, "cache_dir", None),
     )

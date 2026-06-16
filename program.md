@@ -20,7 +20,9 @@ Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026
   Postmortem: `attractor-140m` produce shard reali con latenti `z_0...z_K`; smoke verificato su 2 sample, `seq_len=16`, `K=2`.
 - [x] P0.3 smoke reale: training baseline su traiettorie Attractor.
   Postmortem: training GPU 1 epoca/2 batch completato con `FM + reconstruction + stability`; metriche locali scritte.
-- [ ] P0.4 baseline piccola riproducibile: estrazione 1k/128 token, `K=8`, training breve e report.
+- [x] P0.5 smoke live teacher: training senza shard latenti, con Attractor chiamato nel training step.
+  Postmortem: live smoke su Blackwell completato; il teacher non entra nell'optimizer, output solo in `outputs/live_distill/...`.
+- [ ] P0.6 baseline piccola riproducibile: estrazione offline o live su 1k/128 token, `K=8`, training breve e report.
   Mancante: run non-smoke con subset sufficiente, metriche confrontabili e curve.
 
 ## Ambiente Blackwell Attivo
@@ -42,7 +44,9 @@ Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026
   Verifica: `experiment=blackwell_attractor140` genera manifest reale su `/workspace`.
 - [x] Allenare baseline minima sullo shard reale.
   Verifica: `train.csv`, `val.csv`, `test.json` e summary scritti; loss non-NaN su 2 batch.
-- [ ] Scalare lo smoke a baseline P0 piccola.
+- [x] Aggiungere training live teacher.
+  Verifica: `experiment=blackwell_live_attractor140` completa fit/test su batch token-only e non scrive shard latenti.
+- [ ] Scalare offline o live smoke a baseline P0 piccola.
   Verifica: 1k sample, `seq_len=128`, `K=8`, run_id unico, report locale e metriche stabili.
 - [ ] Solo dopo la baseline supervisionata: MeanFlow/Shortcut/DEQ.
   Verifica: ogni nuova loss deve avere test sintetico prima del run su teacher reale.
@@ -54,6 +58,7 @@ Riferimenti tecnici usati: [Flow Maps di Sander Dieleman](https://sander.ai/2026
 - Per P0 non si salvano full logits per ogni depth: sono troppo grandi. Si parte con latenti, residual, solver iters; KL endpoint resta opzionale.
 - La traiettoria Attractor P0 puo' essere ricostruita richiamando il solver con `max_iter_override=k` per ogni depth richiesto. E' piu' lenta di un hook interno o di `return_trajectory=True`, ma evita patch alla repo esterna.
 - Le sequenze P0 sono fixed length dopo tokenizzazione/troncamento; l'attention mask resta nel formato shard, ma Attractor ignora il padding mask nel backend causale corrente.
+- Offline e live restano due path supportati: offline per debug/riproducibilita' e live per non materializzare tutti i latenti. In live mode il teacher e' chiamato in `torch.no_grad()`, i latenti sono clonati prima della loss, e l'optimizer usa solo `student.parameters()`.
 
 ## Comandi Verificati Su Blackwell
 
@@ -93,6 +98,19 @@ uv run loopdistill-train \
   trainer.limit_test_batches=1 \
   trainer.enable_checkpointing=false
 ```
+
+Smoke live teacher:
+
+```bash
+cd /workspace/looped-transformer-distillation
+RUN_ID=live_smoke_attractor_$(date -u +%Y%m%d_%H%M%S)
+uv run loopdistill-train \
+  experiment=blackwell_live_attractor140 \
+  run_id=$RUN_ID \
+  output_dir=outputs/live_distill/$RUN_ID
+```
+
+Nota: se FineWeb-Edu non e' ancora materializzato nella cache Arrow di `datasets`, il primo live run puo' spendere circa 1-2 minuti a generare lo split `sample-10BT` dalla cache parquet. I run successivi riusano la cache.
 
 ## Architettura Della Repo
 

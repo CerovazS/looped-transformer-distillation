@@ -9,6 +9,7 @@ extraction:
   source: text
   dataset_path: /workspace/datasets/fineweb-edu
   dataset_id: HuggingFaceFW/fineweb-edu
+  dataset_config_name: sample-10BT
   cache_dir: /workspace/.cache/huggingface
   split: train
   text_column: text

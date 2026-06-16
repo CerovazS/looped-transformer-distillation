@@ -41,12 +41,25 @@ The default Attractor config is read-only and expects:
 - `/workspace/external/models/attractor-140m`
 - `/workspace/datasets/fineweb-edu`
 
+For live teacher training without writing latent shards:
+
+```bash
+uv run loopdistill-train \
+  experiment=blackwell_live_attractor140 \
+  output_dir=outputs/live_distill/live_smoke_$(date -u +%Y%m%d_%H%M%S)
+```
+
+Live mode reads token batches from FineWeb-Edu, calls the teacher under `torch.no_grad()`, and
+optimizes only `student.parameters()`.
+
 ## Current Scope
 
 - P0 implemented: shard/manifest dataset, mock teacher extraction, student latent transformer,
   FM/endpoint/logit/reconstruction/stability losses, Hydra/Lightning training.
 - P0 real smoke implemented: Attractor 140M teacher adapter, FineWeb-Edu text extraction, and
   Blackwell smoke configs.
+- P0 live smoke implemented: token-only FineWeb datamodule plus live teacher trajectory generation
+  inside the Lightning training step.
 - P1 implemented as reusable modules: MeanFlow JVP loss, Shortcut consistency loss, TorchDEQ
   wrapper.
 - Parcae and Ouro adapters are still thin non-vendored integration points; they fail with explicit

@@ -11,6 +11,7 @@ def load_text_dataset(
     *,
     dataset_path: str | None = None,
     dataset_id: str | None = None,
+    dataset_config_name: str | None = None,
     split: str = "train",
     cache_dir: str | None = None,
 ):
@@ -18,9 +19,14 @@ def load_text_dataset(
 
     if dataset_path:
         path = Path(dataset_path).expanduser()
-        dataset = load_from_disk(str(path))
+        try:
+            dataset = load_from_disk(str(path))
+        except FileNotFoundError:
+            if not dataset_id:
+                raise
+            dataset = load_dataset(dataset_id, dataset_config_name, split=split, cache_dir=cache_dir)
     elif dataset_id:
-        dataset = load_dataset(dataset_id, split=split, cache_dir=cache_dir)
+        dataset = load_dataset(dataset_id, dataset_config_name, split=split, cache_dir=cache_dir)
     else:
         raise ValueError("Text extraction requires either dataset_path or dataset_id.")
 

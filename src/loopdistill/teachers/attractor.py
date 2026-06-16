@@ -75,6 +75,11 @@ class AttractorTeacher(TeacherRunner):
     def tokenizer_id(self) -> str:
         return str(self.checkpoint_dir)
 
+    def set_device(self, device: str | torch.device) -> None:
+        self.device = _resolve_device(device)
+        if self._model is not None:
+            self._model = self._model.to(device=self.device)
+
     def encode_text(self, text: str) -> list[int]:
         tokenizer = self._load_tokenizer()
         return tokenizer.encode(text, add_special_tokens=False)
@@ -91,7 +96,7 @@ class AttractorTeacher(TeacherRunner):
         attention_mask = attention_mask.to(self.device)
         batch = tokens.shape[0]
 
-        with torch.inference_mode():
+        with torch.no_grad():
             freqs_cis = model.freqs_cis[:, : tokens.shape[1]]
             context = model._encode(tokens, freqs_cis, attention_mask)
             states = []

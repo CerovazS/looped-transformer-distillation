@@ -4,8 +4,8 @@ defaults:
   - student: small
   - loss: p0
   - trainer: default
-  - experiment: local
   - _self_
+  - experiment: local
 
 seed: 17
 run_id: ${now:%Y%m%d_%H%M%S}
@@ -19,6 +19,7 @@ extraction:
   source: synthetic
   dataset_path: null
   dataset_id: synthetic-smoke
+  dataset_config_name: null
   cache_dir: null
   split: train
   text_column: text
@@ -28,5 +29,9 @@ extraction:
   depths: null
   shuffle: true
   max_text_chars: 200000
+
+live:
+  enabled: false
+  depths: null
 
 mode: train
