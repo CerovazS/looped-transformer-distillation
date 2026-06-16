@@ -4,7 +4,7 @@ run_id: live_p0_attractor140_k8_s128_${now:%Y%m%d_%H%M%S}
 output_dir: outputs/live_distill/${run_id}
 
 defaults:
-  - override /data: live_text
+  - override /data: token_shards
   - override /teacher: attractor
 
 live:
@@ -35,13 +35,13 @@ eval_quality:
   run_on_test: true
 
 data:
-  batch_size: 1
-  seq_len: 128
-  train_samples: 4096
-  val_samples: 256
-  test_samples: 256
-  num_workers: 0
+  train_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/train.pt
+  val_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/val.pt
+  test_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/test.pt
+  batch_size: 2
+  num_workers: 4
   pin_memory: true
+  drop_last: true
 
 teacher:
   max_depth: 8
@@ -54,7 +54,7 @@ trainer:
   devices: 2
   strategy: ddp_fork
   precision: bf16-mixed
-  accumulate_grad_batches: 8
+  accumulate_grad_batches: 4
   log_every_n_steps: 10
   limit_train_batches: null
   limit_val_batches: null

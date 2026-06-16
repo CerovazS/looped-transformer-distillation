@@ -33,6 +33,7 @@ a100 = [
 [project.scripts]
 loopdistill-train = "loopdistill.train:main"
 loopdistill-extract = "loopdistill.extract_trajectories:main"
+loopdistill-tokenize = "loopdistill.tokenize_text:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -185,4 +185,5 @@ def test_hydra_full_live_experiment_uses_ddp_and_k8():
     assert cfg.trainer.strategy == "ddp_fork"
     assert cfg.live.depths == list(range(9))
     assert cfg.loss.rollout_steps == 8
-    assert len({cfg.data.train_split, cfg.data.val_split, cfg.data.test_split}) == 3
+    assert cfg.data._target_ == "loopdistill.data.token_shards.TokenShardDataModule"
+    assert len({cfg.tokenization.train_split, cfg.tokenization.val_split, cfg.tokenization.test_split}) == 3

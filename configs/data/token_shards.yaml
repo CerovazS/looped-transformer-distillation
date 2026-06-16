@@ -1,0 +1,8 @@
+_target_: loopdistill.data.token_shards.TokenShardDataModule
+train_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/train.pt
+val_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/val.pt
+test_path: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512/test.pt
+batch_size: 2
+num_workers: 4
+pin_memory: true
+drop_last: true

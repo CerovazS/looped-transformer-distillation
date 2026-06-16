@@ -31,6 +31,26 @@ extraction:
   shuffle: true
   max_text_chars: 200000
 
+tokenization:
+  output_dir: /workspace/loopdistill_tokens/fineweb_edu_attractor140_s512
+  dataset_path: null
+  dataset_id: HuggingFaceFW/fineweb-edu
+  dataset_config_name: sample-10BT
+  cache_dir: /workspace/.cache/huggingface
+  tokenizer_dir: /workspace/external/models/attractor-140m
+  text_column: text
+  train_split: train[:98%]
+  val_split: train[98%:99%]
+  test_split: train[99%:]
+  batch_size: 64
+  seq_len: 512
+  train_samples: 8192
+  val_samples: 512
+  test_samples: 512
+  seed_offset: 0
+  shuffle: true
+  max_text_chars: 200000
+
 live:
   enabled: false
   depths: null
