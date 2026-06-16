@@ -6,7 +6,7 @@ from typing import Any
 
 import lightning as L
 import torch
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 from loopdistill.data.text import iter_text_token_batches, load_text_dataset
 
@@ -52,6 +52,7 @@ class TextTokenIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
             cache_dir=self.cache_dir,
         )
         tokenizer = self._load_tokenizer()
+        shard_index, shard_count = self._distributed_shard()
         yield from iter_text_token_batches(
             dataset=dataset,
             encode_text=lambda text: tokenizer.encode(text, add_special_tokens=False),
@@ -62,6 +63,8 @@ class TextTokenIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
             seed=self.seed,
             shuffle=self.shuffle,
             max_text_chars=self.max_text_chars,
+            shard_index=shard_index,
+            shard_count=shard_count,
         )
 
     def _load_tokenizer(self):
@@ -82,6 +85,17 @@ class TextTokenIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
                 add_bos_token=False,
                 add_eos_token=False,
             )
+
+    def _distributed_shard(self) -> tuple[int, int]:
+        rank = 0
+        world_size = 1
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+        worker = get_worker_info()
+        if worker is None:
+            return rank, world_size
+        return rank * worker.num_workers + worker.id, world_size * worker.num_workers
 
 
 class TextTokenDataModule(L.LightningDataModule):

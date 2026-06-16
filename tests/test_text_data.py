@@ -26,6 +26,28 @@ def test_iter_text_token_batches_chunks_fixed_length():
     assert batches[0]["attention_mask"].all()
 
 
+def test_iter_text_token_batches_shards_are_disjoint():
+    dataset = [{"text": "abcdefghijkl"}]
+    common = {
+        "dataset": dataset,
+        "encode_text": lambda text: [ord(char) for char in text],
+        "batch_size": 2,
+        "seq_len": 2,
+        "num_samples": 6,
+        "shuffle": False,
+        "shard_count": 2,
+    }
+
+    shard0 = list(iter_text_token_batches(**common, shard_index=0))
+    shard1 = list(iter_text_token_batches(**common, shard_index=1))
+
+    tokens0 = {tuple(row.tolist()) for batch in shard0 for row in batch["tokens"]}
+    tokens1 = {tuple(row.tolist()) for batch in shard1 for row in batch["tokens"]}
+    assert tokens0
+    assert tokens1
+    assert tokens0.isdisjoint(tokens1)
+
+
 def test_attractor_teacher_requires_consecutive_depths():
     teacher = AttractorTeacher(
         repo_path="/missing",

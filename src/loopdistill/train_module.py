@@ -40,17 +40,24 @@ class DistillationModule(L.LightningModule):
         }
 
     def _step(self, batch: dict[str, Any], prefix: str) -> torch.Tensor:
-        batch = self._prepare_batch(batch)
+        batch = self._prepare_batch(batch, prefix)
         return self._loss_step(batch, prefix)
 
-    def _prepare_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
+    def _prepare_batch(self, batch: dict[str, Any], prefix: str) -> dict[str, Any]:
         batch = self._move_batch(batch)
-        return self._maybe_add_live_teacher_trajectory(batch)
+        return self._maybe_add_live_teacher_trajectory(batch, return_logits=self._needs_teacher_logits(prefix))
 
     def _loss_step(self, batch: dict[str, Any], prefix: str) -> torch.Tensor:
         metrics = self.loss_module.compute(batch, self.student)
         for key, value in metrics.items():
-            self.log(f"{prefix}/{key}", value, prog_bar=key == "loss", on_step=prefix == "train", on_epoch=True)
+            self.log(
+                f"{prefix}/{key}",
+                value,
+                prog_bar=key == "loss",
+                on_step=prefix == "train",
+                on_epoch=True,
+                sync_dist=self._sync_dist(),
+            )
         return metrics["loss"]
 
     def _quality_step(self, batch: dict[str, Any], prefix: str) -> None:
@@ -62,7 +69,14 @@ class DistillationModule(L.LightningModule):
             return
         metrics = self.quality_evaluator.compute(batch, self.student)
         for key, value in metrics.items():
-            self.log(f"eval_quality/{prefix}/{key}", value, prog_bar=False, on_step=False, on_epoch=True)
+            self.log(
+                f"eval_quality/{prefix}/{key}",
+                value,
+                prog_bar=False,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=self._sync_dist(),
+            )
 
     def _should_run_val_quality(self) -> bool:
         every_n_epochs = int(getattr(self.quality_evaluator, "every_n_epochs", 1))
@@ -70,7 +84,28 @@ class DistillationModule(L.LightningModule):
             return False
         return (int(self.current_epoch) + 1) % every_n_epochs == 0
 
-    def _maybe_add_live_teacher_trajectory(self, batch: dict[str, Any]) -> dict[str, Any]:
+    def _sync_dist(self) -> bool:
+        try:
+            return int(self.trainer.world_size) > 1
+        except RuntimeError:
+            return False
+
+    def _needs_teacher_logits(self, prefix: str) -> bool:
+        if prefix == "train":
+            return float(getattr(self.loss_module, "endpoint_kl_weight", 0.0)) != 0.0
+        quality_enabled = self.quality_evaluator is not None and bool(getattr(self.quality_evaluator, "enabled", False))
+        if prefix == "val":
+            quality_enabled = quality_enabled and self._should_run_val_quality()
+        if prefix == "test":
+            quality_enabled = quality_enabled and bool(getattr(self.quality_evaluator, "run_on_test", True))
+        return quality_enabled or float(getattr(self.loss_module, "endpoint_kl_weight", 0.0)) != 0.0
+
+    def _maybe_add_live_teacher_trajectory(
+        self,
+        batch: dict[str, Any],
+        *,
+        return_logits: bool | None = None,
+    ) -> dict[str, Any]:
         if "z" in batch:
             return batch
         if self.teacher is None:
@@ -82,12 +117,19 @@ class DistillationModule(L.LightningModule):
         if depths is None:
             max_depth = int(getattr(self.teacher, "max_depth", 4))
             depths = list(range(max_depth + 1))
-        with torch.no_grad():
-            output = self.teacher.run_batch(
-                tokens=batch["tokens"],
-                attention_mask=batch["attention_mask"],
-                depths=[int(depth) for depth in depths],
-            )
+        previous_return_logits = getattr(self.teacher, "return_logits", None)
+        if return_logits is not None and previous_return_logits is not None:
+            self.teacher.return_logits = bool(return_logits)
+        try:
+            with torch.no_grad():
+                output = self.teacher.run_batch(
+                    tokens=batch["tokens"],
+                    attention_mask=batch["attention_mask"],
+                    depths=[int(depth) for depth in depths],
+                )
+        finally:
+            if previous_return_logits is not None:
+                self.teacher.return_logits = previous_return_logits
         batch["K"] = torch.full(
             (batch["tokens"].shape[0],),
             output.z.shape[1] - 1,
@@ -106,13 +148,13 @@ class DistillationModule(L.LightningModule):
         return self._step(batch, "train")
 
     def validation_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
-        batch = self._prepare_batch(batch)
+        batch = self._prepare_batch(batch, "val")
         loss = self._loss_step(batch, "val")
         self._quality_step(batch, "val")
         return loss
 
     def test_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
-        batch = self._prepare_batch(batch)
+        batch = self._prepare_batch(batch, "test")
         loss = self._loss_step(batch, "test")
         self._quality_step(batch, "test")
         return loss
@@ -137,7 +179,7 @@ class DistillationModule(L.LightningModule):
         self._append_metrics("val")
 
     def _append_metrics(self, split: str) -> None:
-        if self.metrics_dir is None or self.trainer.sanity_checking:
+        if self.metrics_dir is None or self.trainer.sanity_checking or not self.trainer.is_global_zero:
             return
         self.metrics_dir.mkdir(parents=True, exist_ok=True)
         path = self.metrics_dir / f"{split}.csv"

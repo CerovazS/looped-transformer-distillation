@@ -9,20 +9,25 @@ from typing import Any
 from omegaconf import DictConfig, OmegaConf
 
 
-def ensure_run_dirs(output_dir: str | os.PathLike[str]) -> dict[str, Path]:
+def run_dirs(output_dir: str | os.PathLike[str]) -> dict[str, Path]:
     root = Path(output_dir)
-    if root.exists() and any(root.iterdir()):
-        raise FileExistsError(
-            f"Output directory already exists and is not empty: {root}. "
-            "Choose a new run_id to avoid overwriting artifacts."
-        )
-    dirs = {
+    return {
         "root": root,
         "artifacts": root / "artifacts",
         "metrics": root / "metrics",
         "plots": root / "plots",
         "reports": root / "reports",
     }
+
+
+def ensure_run_dirs(output_dir: str | os.PathLike[str]) -> dict[str, Path]:
+    dirs = run_dirs(output_dir)
+    root = dirs["root"]
+    if root.exists() and any(root.iterdir()):
+        raise FileExistsError(
+            f"Output directory already exists and is not empty: {root}. "
+            "Choose a new run_id to avoid overwriting artifacts."
+        )
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     return dirs

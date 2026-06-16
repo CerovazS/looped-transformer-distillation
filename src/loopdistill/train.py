@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
-from time import time
+from time import sleep, time
 
 import hydra
 import lightning as L
@@ -12,13 +13,30 @@ from omegaconf import DictConfig
 
 from loopdistill.train_module import DistillationModule
 from loopdistill.utils.logging import info, ok
-from loopdistill.utils.run import ensure_run_dirs, save_resolved_config, write_run_summary
+from loopdistill.utils.run import ensure_run_dirs, run_dirs, save_resolved_config, write_run_summary
+
+
+def _is_global_zero_env() -> bool:
+    return int(os.environ.get("RANK", "0")) == 0
+
+
+def _wait_for_run_dirs(output_dir: str, timeout_seconds: int = 120) -> None:
+    root = Path(output_dir)
+    for _ in range(timeout_seconds * 10):
+        if (root / "artifacts" / "config_resolved.yaml").exists():
+            return
+        sleep(0.1)
+    raise TimeoutError(f"Timed out waiting for rank 0 to initialize run directory: {output_dir}")
 
 
 def run(cfg: DictConfig) -> None:
     started = time()
-    dirs = ensure_run_dirs(cfg.output_dir)
-    save_resolved_config(cfg, cfg.output_dir)
+    if _is_global_zero_env():
+        dirs = ensure_run_dirs(cfg.output_dir)
+        save_resolved_config(cfg, cfg.output_dir)
+    else:
+        _wait_for_run_dirs(cfg.output_dir)
+        dirs = run_dirs(cfg.output_dir)
     L.seed_everything(cfg.seed, workers=True)
 
     info("Instantiating data, student, and loss modules")
@@ -39,13 +57,14 @@ def run(cfg: DictConfig) -> None:
     trainer = instantiate(cfg.trainer)
     trainer.fit(module, datamodule=data)
     trainer.test(module, datamodule=data)
-    write_run_summary(
-        cfg.output_dir,
-        title="LoopDistill training run",
-        metrics={k: float(v.detach().cpu()) for k, v in trainer.callback_metrics.items() if hasattr(v, "detach")},
-        started_at=started,
-    )
-    ok(f"Training complete: {cfg.output_dir}")
+    if trainer.is_global_zero:
+        write_run_summary(
+            cfg.output_dir,
+            title="LoopDistill training run",
+            metrics={k: float(v.detach().cpu()) for k, v in trainer.callback_metrics.items() if hasattr(v, "detach")},
+            started_at=started,
+        )
+        ok(f"Training complete: {cfg.output_dir}")
 
 
 def main() -> None:

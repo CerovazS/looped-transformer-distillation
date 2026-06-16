@@ -7,7 +7,9 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 
 from loopdistill.losses.p0 import LoopDistillationLoss
+from loopdistill.metrics.quality import QualityEvaluator
 from loopdistill.models.student import StudentFlowModel
+from loopdistill.teachers.base import TeacherOutput
 from loopdistill.teachers.mock import MockTeacher
 from loopdistill.train_module import DistillationModule
 
@@ -52,6 +54,50 @@ def test_live_optimizer_uses_student_parameters_only():
     student_param_ids = {id(param) for param in student.parameters()}
 
     assert opt_param_ids == student_param_ids
+
+
+class _FlaggedLogitTeacher:
+    teacher_id = "flagged"
+
+    def __init__(self):
+        self.return_logits = True
+        self.calls: list[bool] = []
+
+    def run_batch(self, tokens, attention_mask, depths):
+        self.calls.append(bool(self.return_logits))
+        batch, seq_len = tokens.shape
+        depth = max(depths) + 1
+        z = torch.randn(batch, depth, seq_len, 8, device=tokens.device)
+        logits = torch.randn(batch, 1, seq_len, 16, device=tokens.device) if self.return_logits else None
+        return TeacherOutput(
+            z=z,
+            logits=logits,
+            loss_K=torch.zeros(batch, device=tokens.device),
+            residual_norm=torch.zeros(batch, device=tokens.device),
+            solver_iters=torch.full((batch,), depth - 1, device=tokens.device),
+        )
+
+
+def test_live_teacher_logits_only_requested_for_quality_eval():
+    student = StudentFlowModel(latent_dim=8, hidden_dim=32, num_layers=1, num_heads=4, vocab_size=16)
+    teacher = _FlaggedLogitTeacher()
+    module = DistillationModule(
+        student=student,
+        loss_module=LoopDistillationLoss(endpoint_kl_weight=0.0),
+        quality_evaluator=QualityEvaluator(enabled=True),
+        teacher=teacher,
+        live_depths=[0, 1],
+    )
+    batch = {
+        "tokens": torch.randint(0, 16, (2, 5)),
+        "attention_mask": torch.ones(2, 5, dtype=torch.bool),
+    }
+
+    module._step(dict(batch), "train")
+    prepared = module._prepare_batch(dict(batch), "val")
+
+    assert teacher.calls == [False, True]
+    assert prepared["logits"] is not None
 
 
 class _TokenOnlyDataset(torch.utils.data.Dataset):
@@ -128,3 +174,15 @@ def test_hydra_live_experiment_overrides_defaults():
     assert cfg.teacher.return_logits is True
     assert cfg.eval_quality.enabled is True
     assert cfg.output_dir.startswith("outputs/live_distill/")
+
+
+def test_hydra_full_live_experiment_uses_ddp_and_k8():
+    config_dir = str((Path(__file__).resolve().parents[1] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(config_name="config", overrides=["experiment=blackwell_live_attractor140_p0_full"])
+
+    assert cfg.trainer.devices == 2
+    assert cfg.trainer.strategy == "ddp"
+    assert cfg.live.depths == list(range(9))
+    assert cfg.loss.rollout_steps == 8
+    assert len({cfg.data.train_split, cfg.data.val_split, cfg.data.test_split}) == 3
