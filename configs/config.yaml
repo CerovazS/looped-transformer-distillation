@@ -3,6 +3,7 @@ defaults:
   - teacher: mock
   - student: small
   - loss: p0
+  - eval_quality: default
   - trainer: default
   - _self_
   - experiment: local

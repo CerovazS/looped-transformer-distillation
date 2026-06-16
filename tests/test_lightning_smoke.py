@@ -8,6 +8,7 @@ import torch
 from loopdistill.data.datamodule import TrajectoryDataModule
 from loopdistill.data.writer import TrajectoryShardWriter
 from loopdistill.losses.p0 import LoopDistillationLoss
+from loopdistill.metrics.quality import QualityEvaluator
 from loopdistill.models.student import StudentFlowModel
 from loopdistill.train_module import DistillationModule
 
@@ -27,7 +28,12 @@ def test_lightning_two_batches(tmp_path: Path):
     writer.write_shard(tensors, shard_name="shard.pt")
     data = TrajectoryDataModule(str(writer.manifest_path), batch_size=4)
     student = StudentFlowModel(latent_dim=8, hidden_dim=32, num_layers=1, num_heads=4, vocab_size=16)
-    module = DistillationModule(student, LoopDistillationLoss(), metrics_dir=str(tmp_path / "metrics"))
+    module = DistillationModule(
+        student,
+        LoopDistillationLoss(),
+        quality_evaluator=QualityEvaluator(enabled=True, top_k=2),
+        metrics_dir=str(tmp_path / "metrics"),
+    )
     trainer = L.Trainer(
         max_epochs=1,
         accelerator="cpu",
@@ -40,3 +46,4 @@ def test_lightning_two_batches(tmp_path: Path):
     )
     trainer.fit(module, datamodule=data)
     assert (tmp_path / "metrics" / "train.csv").exists()
+    assert "eval_quality/val/nll_student" in (tmp_path / "metrics" / "val.csv").read_text()

@@ -23,6 +23,14 @@ loss:
   endpoint_kl_weight: 0.0
   rollout_steps: 2
 
+eval_quality:
+  enabled: true
+  top_k: 5
+  temperature: 1.0
+  rollout_steps: 2
+  every_n_epochs: 1
+  run_on_test: true
+
 data:
   batch_size: 1
   seq_len: 16
@@ -32,7 +40,8 @@ data:
 
 teacher:
   max_depth: 2
-  return_logits: false
+  return_logits: true
+  logit_depths: final
 
 trainer:
   max_epochs: 1

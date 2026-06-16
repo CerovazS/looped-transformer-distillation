@@ -16,6 +16,7 @@ class DistillationModule(L.LightningModule):
         self,
         student: nn.Module,
         loss_module: nn.Module,
+        quality_evaluator: nn.Module | None = None,
         teacher: TeacherRunner | None = None,
         live_depths: list[int] | None = None,
         lr: float = 3e-4,
@@ -25,6 +26,7 @@ class DistillationModule(L.LightningModule):
         super().__init__()
         self.student = student
         self.loss_module = loss_module
+        self.quality_evaluator = quality_evaluator
         self.teacher = teacher
         self.live_depths = live_depths
         self.lr = lr
@@ -38,12 +40,35 @@ class DistillationModule(L.LightningModule):
         }
 
     def _step(self, batch: dict[str, Any], prefix: str) -> torch.Tensor:
+        batch = self._prepare_batch(batch)
+        return self._loss_step(batch, prefix)
+
+    def _prepare_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         batch = self._move_batch(batch)
-        batch = self._maybe_add_live_teacher_trajectory(batch)
+        return self._maybe_add_live_teacher_trajectory(batch)
+
+    def _loss_step(self, batch: dict[str, Any], prefix: str) -> torch.Tensor:
         metrics = self.loss_module.compute(batch, self.student)
         for key, value in metrics.items():
             self.log(f"{prefix}/{key}", value, prog_bar=key == "loss", on_step=prefix == "train", on_epoch=True)
         return metrics["loss"]
+
+    def _quality_step(self, batch: dict[str, Any], prefix: str) -> None:
+        if self.quality_evaluator is None or not bool(getattr(self.quality_evaluator, "enabled", False)):
+            return
+        if prefix == "val" and not self._should_run_val_quality():
+            return
+        if prefix == "test" and not bool(getattr(self.quality_evaluator, "run_on_test", True)):
+            return
+        metrics = self.quality_evaluator.compute(batch, self.student)
+        for key, value in metrics.items():
+            self.log(f"eval_quality/{prefix}/{key}", value, prog_bar=False, on_step=False, on_epoch=True)
+
+    def _should_run_val_quality(self) -> bool:
+        every_n_epochs = int(getattr(self.quality_evaluator, "every_n_epochs", 1))
+        if every_n_epochs <= 0:
+            return False
+        return (int(self.current_epoch) + 1) % every_n_epochs == 0
 
     def _maybe_add_live_teacher_trajectory(self, batch: dict[str, Any]) -> dict[str, Any]:
         if "z" in batch:
@@ -81,10 +106,16 @@ class DistillationModule(L.LightningModule):
         return self._step(batch, "train")
 
     def validation_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
-        return self._step(batch, "val")
+        batch = self._prepare_batch(batch)
+        loss = self._loss_step(batch, "val")
+        self._quality_step(batch, "val")
+        return loss
 
     def test_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
-        return self._step(batch, "test")
+        batch = self._prepare_batch(batch)
+        loss = self._loss_step(batch, "test")
+        self._quality_step(batch, "test")
+        return loss
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.student.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -112,7 +143,7 @@ class DistillationModule(L.LightningModule):
         path = self.metrics_dir / f"{split}.csv"
         row = {"epoch": self.current_epoch}
         for key, value in self.trainer.callback_metrics.items():
-            if key.startswith(f"{split}/"):
+            if key.startswith(f"{split}/") or key.startswith(f"eval_quality/{split}/"):
                 row[key] = float(value.detach().cpu())
         if len(row) == 1:
             return

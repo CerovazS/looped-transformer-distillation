@@ -51,6 +51,14 @@ uv run loopdistill-train \
 
 Live mode reads token batches from FineWeb-Edu, calls the teacher under `torch.no_grad()`, and
 optimizes only `student.parameters()`.
+FineWeb-Edu `sample-10BT` only exposes a `train` split, so the live config uses non-overlapping
+HF slice expressions for train/validation/test by default.
+
+When `eval_quality.enabled=true`, validation/test also compute endpoint language-model metrics:
+KL between final student and teacher logits, teacher/student NLL and PPL deltas, top-1 agreement,
+and top-k overlap. These metrics are logged under `eval_quality/val/*` and
+`eval_quality/test/*`; the training objective remains FM/reconstruction/stability unless the loss
+config explicitly enables endpoint KL.
 
 ## Current Scope
 
@@ -60,6 +68,8 @@ optimizes only `student.parameters()`.
   Blackwell smoke configs.
 - P0 live smoke implemented: token-only FineWeb datamodule plus live teacher trajectory generation
   inside the Lightning training step.
+- P0 quality eval implemented: final-logit KL, NLL/PPL teacher-student-delta, top-1 agreement, and
+  top-k overlap on held-out validation/test slices.
 - P1 implemented as reusable modules: MeanFlow JVP loss, Shortcut consistency loss, TorchDEQ
   wrapper.
 - Parcae and Ouro adapters are still thin non-vendored integration points; they fail with explicit

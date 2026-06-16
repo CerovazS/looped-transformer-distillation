@@ -125,4 +125,6 @@ def test_hydra_live_experiment_overrides_defaults():
     assert cfg.live.enabled is True
     assert cfg.data._target_ == "loopdistill.data.live.TextTokenDataModule"
     assert cfg.teacher._target_ == "loopdistill.teachers.attractor.AttractorTeacher"
+    assert cfg.teacher.return_logits is True
+    assert cfg.eval_quality.enabled is True
     assert cfg.output_dir.startswith("outputs/live_distill/")

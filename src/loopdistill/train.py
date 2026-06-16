@@ -25,11 +25,13 @@ def run(cfg: DictConfig) -> None:
     data = instantiate(cfg.data)
     student = instantiate(cfg.student)
     loss_module = instantiate(cfg.loss)
+    quality_evaluator = instantiate(cfg.eval_quality)
     live_cfg = cfg.get("live", {})
     teacher = instantiate(cfg.teacher) if bool(live_cfg.get("enabled", False)) else None
     module = DistillationModule(
         student=student,
         loss_module=loss_module,
+        quality_evaluator=quality_evaluator,
         teacher=teacher,
         live_depths=live_cfg.get("depths", None),
         metrics_dir=str(dirs["metrics"]),

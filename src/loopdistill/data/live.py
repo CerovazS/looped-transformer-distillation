@@ -107,6 +107,7 @@ class TextTokenDataModule(L.LightningDataModule):
         seed: int = 17,
         shuffle: bool = True,
         max_text_chars: int | None = 200_000,
+        allow_train_reuse_for_smoke: bool = False,
         num_workers: int = 0,
         pin_memory: bool = False,
     ):
@@ -127,6 +128,7 @@ class TextTokenDataModule(L.LightningDataModule):
         self.train_split = train_split
         self.val_split = val_split or train_split
         self.test_split = test_split or self.val_split
+        self.allow_train_reuse_for_smoke = bool(allow_train_reuse_for_smoke)
         self.train_samples = train_samples
         self.val_samples = val_samples
         self.test_samples = test_samples
@@ -134,6 +136,7 @@ class TextTokenDataModule(L.LightningDataModule):
         self.pin_memory = pin_memory
 
     def setup(self, stage: str | None = None) -> None:
+        self._validate_splits()
         if stage in (None, "fit"):
             self.train_dataset = self._dataset(self.train_split, self.train_samples, seed_offset=0)
             self.val_dataset = self._dataset(self.val_split, self.val_samples, seed_offset=10_000)
@@ -169,3 +172,15 @@ class TextTokenDataModule(L.LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
         )
+
+    def _validate_splits(self) -> None:
+        if self.allow_train_reuse_for_smoke:
+            return
+        splits = {self.train_split, self.val_split, self.test_split}
+        if len(splits) < 3:
+            raise ValueError(
+                "TextTokenDataModule requires distinct train/val/test split expressions. "
+                "For FineWeb-Edu sample-10BT use HF slices such as "
+                "'train[:98%]', 'train[98%:99%]', 'train[99%:]'. "
+                "Set allow_train_reuse_for_smoke=true only for explicit smoke tests."
+            )

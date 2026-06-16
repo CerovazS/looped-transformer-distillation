@@ -2,9 +2,9 @@ _target_: loopdistill.data.live.TextTokenDataModule
 dataset_path: /workspace/datasets/fineweb-edu
 dataset_id: HuggingFaceFW/fineweb-edu
 dataset_config_name: sample-10BT
-train_split: train
-val_split: train
-test_split: train
+train_split: train[:98%]
+val_split: train[98%:99%]
+test_split: train[99%:]
 cache_dir: /workspace/.cache/huggingface
 tokenizer_dir: /workspace/external/models/attractor-140m
 text_column: text
@@ -16,5 +16,6 @@ test_samples: 128
 seed: ${seed}
 shuffle: true
 max_text_chars: 200000
+allow_train_reuse_for_smoke: false
 num_workers: 0
 pin_memory: false
