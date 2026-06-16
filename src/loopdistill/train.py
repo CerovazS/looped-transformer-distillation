@@ -17,6 +17,8 @@ from loopdistill.utils.run import ensure_run_dirs, run_dirs, save_resolved_confi
 
 
 def _is_global_zero_env() -> bool:
+    if "LOCAL_RANK" in os.environ:
+        return int(os.environ.get("LOCAL_RANK", "0")) == 0 and int(os.environ.get("NODE_RANK", "0")) == 0
     return int(os.environ.get("RANK", "0")) == 0
 
 
