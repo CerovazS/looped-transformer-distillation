@@ -187,6 +187,13 @@ class DistillationModule(L.LightningModule):
         for key, value in self.trainer.callback_metrics.items():
             if key.startswith(f"{split}/") or key.startswith(f"eval_quality/{split}/"):
                 row[key] = float(value.detach().cpu())
+        if torch.cuda.is_available():
+            row[f"{split}/metric_cuda_memory_allocated_peak_mb"] = (
+                torch.cuda.max_memory_allocated(self.device) / (1024**2)
+            )
+            row[f"{split}/metric_cuda_memory_reserved_peak_mb"] = (
+                torch.cuda.max_memory_reserved(self.device) / (1024**2)
+            )
         if len(row) == 1:
             return
         exists = path.exists()
