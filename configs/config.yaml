@@ -15,4 +15,18 @@ output_dir: outputs/${pipeline_name}/${run_id}
 paths:
   manifest_path: outputs/trajectories/mock/manifest.jsonl
 
+extraction:
+  source: synthetic
+  dataset_path: null
+  dataset_id: synthetic-smoke
+  cache_dir: null
+  split: train
+  text_column: text
+  batch_size: 16
+  seq_len: 24
+  num_samples: 16
+  depths: null
+  shuffle: true
+  max_text_chars: 200000
+
 mode: train

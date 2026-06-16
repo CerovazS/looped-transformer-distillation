@@ -1,0 +1,37 @@
+# @package _global_
+name: blackwell_attractor140
+run_id: attractor140_fineweb_${now:%Y%m%d_%H%M%S}
+
+paths:
+  manifest_path: outputs/trajectories/attractor140_fineweb_${run_id}/manifest.jsonl
+
+extraction:
+  source: text
+  dataset_path: /workspace/datasets/fineweb-edu
+  dataset_id: HuggingFaceFW/fineweb-edu
+  cache_dir: /workspace/.cache/huggingface
+  split: train
+  text_column: text
+  batch_size: 2
+  seq_len: 128
+  num_samples: 8
+  depths: [0, 1, 2, 3, 4, 5, 6, 7, 8]
+  shuffle: true
+  max_text_chars: 200000
+
+student:
+  latent_dim: 1024
+  hidden_dim: 256
+  num_layers: 2
+  num_heads: 8
+  vocab_size: 32768
+  max_seq_len: 2048
+
+trainer:
+  max_epochs: 1
+  accelerator: gpu
+  devices: 1
+  precision: bf16-mixed
+  limit_train_batches: 2
+  limit_val_batches: 1
+  limit_test_batches: 1
