@@ -2,15 +2,45 @@
 
 ![Looped Transformer Flow Distillation cover](assets/readme-cover.png)
 
-Looped Transformer Flow Distillation is a lightweight research codebase for training compact
-student models on the latent trajectories produced by looped or recurrent transformer teachers.
-It supports trajectory extraction, latent-flow supervision, endpoint language-model evaluation,
-and local experiment artifacts built around `uv`, Hydra, and Lightning.
+Looped Transformer Flow Distillation is a lightweight research codebase for replacing the repeated
+latent-refinement loop inside looped, recurrent-depth, and attractor-style transformer teachers.
+The first target is controlled loop-dynamics replacement rather than full language-model
+compression: keep the teacher backbone and language-model head fixed, train a student dynamics
+module on the teacher latent trajectory, and measure whether the student endpoint preserves the
+teacher-head logits.
 
-The core idea is to treat the teacher's repeated refinement steps as a continuous latent path.
-Student models can then learn to reproduce that path with flow-matching, reconstruction, endpoint
-logit, stability, MeanFlow, Shortcut, or DEQ-style objectives while keeping the external teacher
-repositories isolated behind narrow adapters.
+The motivating trajectory is
+
+```text
+z_0, z_1, ..., z_K
+```
+
+where `K` is the teacher loop depth. A student is evaluated with `S` learned rollout or transition
+steps. The core question is whether `S` can be smaller, cheaper, or more structured than `K` while
+preserving endpoint behavior.
+
+The current methods include local flow matching, compositional flow maps, MeanFlow-style
+average-velocity objectives, Shortcut-style consistency, and DEQ-style equilibrium students. External
+teacher repositories stay isolated behind narrow adapters.
+
+## Project Scope
+
+This repository is for trajectory-aware distillation of looped transformer computation.
+
+In scope:
+
+- training smaller dynamics modules that replace the teacher's recurrent loop block;
+- evaluating `K` teacher steps versus `S` student steps under a fixed teacher head;
+- comparing local flow matching, compositional flow maps, MeanFlow, Shortcut, and DEQ variants;
+- keeping local metrics, resolved configs, and run summaries under `outputs/`;
+- supporting synthetic teachers and external Attractor, Parcae, and Ouro-style adapters.
+
+Out of scope for the current baseline:
+
+- claiming standalone student language-model compression unless the student head is explicitly
+  trained;
+- judging loop replacement by the untrained `student_head` metrics;
+- vendoring external teacher repositories into this codebase.
 
 ## Features
 
@@ -22,8 +52,10 @@ repositories isolated behind narrow adapters.
   during training without materializing trajectory shards.
 - **Latent student models** with time and interval conditioning for velocity prediction,
   endpoint reconstruction, and rollout-based objectives.
-- **Quality evaluation** with endpoint KL, teacher/student NLL, perplexity deltas, top-1
-  agreement, and top-k overlap.
+- **Teacher-head quality evaluation** with endpoint KL, NLL/PPL deltas, top-1 agreement, and
+  top-k overlap.
+- **Compositional flow-map losses** for learning interval transitions that can compress a larger
+  teacher depth `K` into a smaller student transition budget `S`.
 - **Local reproducibility artifacts** under `outputs/`, including resolved configs, metrics,
   reports, and plot-ready CSV/JSON files.
 
@@ -117,19 +149,39 @@ uv run loopdistill-train \
   trainer.max_epochs=1
 ```
 
-The default loss combines latent flow matching, endpoint KL, latent reconstruction, and a small
-stability regularizer. MeanFlow, Shortcut, and DEQ modules are available as reusable components
-for research runs that need those objectives.
+The P0 loss combines latent flow matching, endpoint latent reconstruction, optional endpoint KL,
+and a small stability regularizer. Compositional, MeanFlow, Shortcut, and DEQ modules are available
+as reusable components for research runs that need those objectives.
+
+For an Attractor-140M live-teacher baseline:
+
+```bash
+uv run loopdistill-train \
+  experiment=blackwell_live_attractor140_p0_full \
+  eval_quality.enabled=true \
+  eval_quality.rollout_steps=8 \
+  teacher.max_depth=8 \
+  loss.rollout_steps=8
+```
+
+In this example, `K=8` is the teacher target depth and `S=8` is the student rollout budget.
+Changing `teacher.max_depth` and `eval_quality.rollout_steps` gives K/S comparisons such as
+K16/S8.
 
 ### 3. Evaluate Endpoint Quality
 
-When endpoint logits are available, `eval_quality.enabled=true` logs language-model quality
-metrics under `eval_quality/val/*` and `eval_quality/test/*`. Live teacher runs can evaluate two
-endpoint projections: `student_head` tests the student's own LM head, while `teacher_head` rolls
-the student to `z_K_student` and projects it through the original teacher `ln_f/lm_head`. The
-`teacher_head` path is the primary replacement test for looped-layer distillation because the
-teacher backbone and LM head stay fixed and only the loop dynamics are replaced. These metrics are
-separate from the training loss unless the loss configuration explicitly enables endpoint KL.
+When endpoint logits are available, `eval_quality.enabled=true` logs language-model quality metrics
+under `eval_quality/val/*` and `eval_quality/test/*`. Live teacher runs can evaluate two endpoint
+projections:
+
+- `teacher_head`: rolls the student to `z_K_student` and projects it through the original teacher
+  `ln_f/lm_head`;
+- `student_head`: projects through the student's own LM head.
+
+The `teacher_head` path is the primary replacement test for looped-layer distillation because the
+teacher backbone and LM head stay fixed and only the loop dynamics are replaced. The `student_head`
+path is diagnostic unless the run explicitly trains the student head with a logit or endpoint
+objective.
 
 ```bash
 uv run loopdistill-train \
