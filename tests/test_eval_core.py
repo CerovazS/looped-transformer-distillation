@@ -66,7 +66,7 @@ def test_core_lm_renderer_splits_prompt_and_continuation():
     prompts = _render_prompts_lm(item, " ", [])
     tokens, starts, ends = _batch_sequences(tokenizer, prompts, "language_modeling", cfg)
 
-    assert prompts == ["context", "context answer"]
+    assert prompts == ["context ", "context answer"]
     assert len(tokens) == 1
-    assert starts[0] == len(tokenizer.encode("context"))
+    assert starts[0] == len(tokenizer.encode("context "))
     assert ends[0] == len(tokenizer.encode("context answer"))

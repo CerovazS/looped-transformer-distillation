@@ -306,7 +306,7 @@ def _render_prompts_lm(
         for example in fewshot_examples
     )
     prefix = f"{prefix}\n" if prefix else ""
-    prompt_without = f"{prefix}{str(item['context']).strip()}{continuation_delimiter}".strip()
+    prompt_without = f"{prefix}{str(item['context']).strip()}{continuation_delimiter}"
     prompt_with = f"{prefix}{str(item['context']).strip()}{continuation_delimiter}{item['continuation']}"
     return [prompt_without, prompt_with]
 
@@ -1141,6 +1141,9 @@ def run(cfg: DictConfig) -> None:
             "teacher_steps": "auto" if teacher_steps is None else int(teacher_steps),
             "student_steps": None if student_steps is None else int(student_steps),
             "rollout_mode": str(cfg.eval.rollout_mode),
+            "prepend_bos": bool(cfg.eval.prepend_bos),
+            "pad_token_id": _pad_token_id(tokenizer, cfg),
+            "eval_protocol": "core_comparable" if bool(cfg.eval.prepend_bos) else "attractor_distill",
         }
     )
     (dirs["metrics"] / "core_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
