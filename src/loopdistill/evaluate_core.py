@@ -329,8 +329,10 @@ def _batch_sequences(
     if task_type == "language_modeling":
         tokens_without, tokens_with = tokens
         start_idx, end_idx = len(tokens_without), len(tokens_with)
-        if start_idx >= end_idx or tokens_without != tokens_with[:start_idx]:
-            raise ValueError("Language-modeling CORE prompt without continuation is not a prefix.")
+        if tokens_without != tokens_with[:start_idx]:
+            start_idx = _find_common_length([tokens_without, tokens_with], direction="left")
+        if start_idx >= end_idx:
+            raise ValueError("Language-modeling CORE prompt and continuation have no scoreable suffix.")
         return [tokens_with], [start_idx], [end_idx]
     raise ValueError(f"Unsupported task type: {task_type}")
 

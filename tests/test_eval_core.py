@@ -13,6 +13,17 @@ class CharTokenizer:
         return [ord(ch) % 50 for ch in text]
 
 
+class BoundaryMergingTokenizer:
+    bos_token_id = 99
+
+    def encode(self, text: str, add_special_tokens: bool = False):
+        if text == "context ":
+            return [10, 20]
+        if text == "context answer":
+            return [10, 21, 30]
+        return [ord(ch) % 50 for ch in text]
+
+
 def test_sequence_nll_scores_only_continuation_tokens():
     logits = torch.full((1, 4, 5), -8.0)
     tokens = torch.tensor([[0, 1, 2, 3]])
@@ -70,3 +81,16 @@ def test_core_lm_renderer_splits_prompt_and_continuation():
     assert len(tokens) == 1
     assert starts[0] == len(tokenizer.encode("context "))
     assert ends[0] == len(tokenizer.encode("context answer"))
+
+
+def test_core_lm_non_prefix_tokenization_scores_common_suffix():
+    cfg = OmegaConf.create({"eval": {"prepend_bos": False}})
+    tokenizer = BoundaryMergingTokenizer()
+    item = {"context": "context", "continuation": "answer"}
+
+    prompts = _render_prompts_lm(item, " ", [])
+    tokens, starts, ends = _batch_sequences(tokenizer, prompts, "language_modeling", cfg)
+
+    assert tokens == [[10, 21, 30]]
+    assert starts == [1]
+    assert ends == [3]
