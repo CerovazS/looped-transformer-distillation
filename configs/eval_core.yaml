@@ -1,0 +1,37 @@
+defaults:
+  - teacher: attractor
+  - student: small
+  - _self_
+
+seed: 17
+run_id: core_eval_${now:%Y%m%d_%H%M%S}
+pipeline_name: core_eval
+output_dir: outputs/${pipeline_name}/${run_id}
+
+eval:
+  tokenized_dir: /workspace/loopdistill_tokens/core_eval_bundle_attractor_original_rows
+  eval_bundle_dir: null
+  prefer_raw_eval_bundle: true
+  use_fewshot: true
+  # CORE/nanochat prepends BOS. Keep this true for strict CORE comparability;
+  # set false only when deliberately matching distillation token shards encoded
+  # through AttractorTeacher.encode_text(add_special_tokens=False).
+  prepend_bos: true
+  pad_token_id: null
+  model: teacher # teacher | student | both
+  student_checkpoint: null
+  student_config_path: null
+  teacher_steps: auto
+  student_steps: auto
+  rollout_mode: flow_map # velocity | flow_map | avg_velocity
+  device: auto
+  student_dtype: float32
+  batch_size: 1
+  sequence_batch_size: 4
+  tasks: null
+  max_tasks: null
+  max_examples_per_task: null
+  top_k: 5
+  temperature: 1.0
+  max_ppl_exp: 20.0
+  strict_student_load: false
