@@ -1,0 +1,17 @@
+_target_: loopdistill.data.huginn_parquet.HuginnParquetDataModule
+dataset_dir: /workspace/datasets/huginn_train_random_50gib_20260618_1600
+split_glob: "*.parquet"
+input_ids_column: input_ids
+batch_size: 1
+input_length: null
+drop_last_token: true
+pad_token_id: 65509
+train_samples: 1024
+val_samples: 64
+test_samples: 64
+val_file_count: 2
+test_file_count: 2
+seed: ${seed}
+shuffle_files: true
+num_workers: 0
+pin_memory: true
