@@ -171,26 +171,23 @@ class DistillationModule(L.LightningModule):
         self._connect_live_teacher_student()
         return torch.optim.AdamW(self.student.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
-    def configure_model(self) -> None:
-        self._connect_live_teacher_student()
-
     def on_fit_start(self) -> None:
         self._connect_live_teacher_student()
 
     def on_test_start(self) -> None:
         self._connect_live_teacher_student()
 
-    def _connect_live_teacher_student(self) -> None:
+    def _connect_live_teacher_student(self, device: str | torch.device | None = None) -> None:
         if self._teacher_student_connected:
             return
-        self._place_live_teacher()
+        self._place_live_teacher(device=device)
         if self.teacher is not None and hasattr(self.student, "initialize_from_teacher"):
             self.student.initialize_from_teacher(self.teacher)
         self._teacher_student_connected = True
 
-    def _place_live_teacher(self) -> None:
+    def _place_live_teacher(self, device: str | torch.device | None = None) -> None:
         if self.teacher is not None and hasattr(self.teacher, "set_device"):
-            self.teacher.set_device(self.device)
+            self.teacher.set_device(self.device if device is None else device)
 
     def on_train_epoch_end(self) -> None:
         self._append_metrics("train")

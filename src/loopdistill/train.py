@@ -7,6 +7,7 @@ from time import sleep, time
 
 import hydra
 import lightning as L
+import torch
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import DictConfig
@@ -29,6 +30,15 @@ def _wait_for_run_dirs(output_dir: str, timeout_seconds: int = 120) -> None:
             return
         sleep(0.1)
     raise TimeoutError(f"Timed out waiting for rank 0 to initialize run directory: {output_dir}")
+
+
+def _live_teacher_device(cfg: DictConfig) -> torch.device | None:
+    trainer_cfg = cfg.get("trainer", {})
+    accelerator = str(trainer_cfg.get("accelerator", "auto"))
+    if accelerator not in {"gpu", "cuda", "auto"} or not torch.cuda.is_available():
+        return None
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    return torch.device(f"cuda:{local_rank}")
 
 
 def run(cfg: DictConfig) -> None:
@@ -58,6 +68,7 @@ def run(cfg: DictConfig) -> None:
         metrics_dir=str(dirs["metrics"]),
         test_metric_prefix=str(final_eval_cfg.get("metric_prefix", "test")),
     )
+    module._connect_live_teacher_student(device=_live_teacher_device(cfg))
     trainer = instantiate(cfg.trainer)
     trainer.fit(module, datamodule=data)
     if bool(final_eval_cfg.get("enabled", True)):
