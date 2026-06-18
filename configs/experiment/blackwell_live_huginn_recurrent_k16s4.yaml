@@ -27,7 +27,7 @@ eval_quality:
   temperature: 1.0
   rollout_steps: 4
   rollout_mode: flow_map
-  every_n_epochs: ${oc.decode:${oc.env:HUGINN_QUALITY_EVERY_N_EPOCHS,1}}
+  every_n_epochs: 1
   run_on_test: true
   require_logits: true
 
@@ -37,9 +37,9 @@ final_evaluation:
   metrics_filename: in_distribution_test.json
 
 data:
-  train_samples: 2048
-  val_samples: 128
-  test_samples: 128
+  train_samples: null
+  val_samples: ${oc.decode:${oc.env:HUGINN_VAL_SAMPLES,128}}
+  test_samples: ${oc.decode:${oc.env:HUGINN_TEST_SAMPLES,128}}
   batch_size: 1
   input_length: null
   drop_last_token: true
@@ -60,6 +60,7 @@ trainer:
   accumulate_grad_batches: 1
   log_every_n_steps: 10
   check_val_every_n_epoch: 1
+  val_check_interval: ${oc.decode:${oc.env:HUGINN_VAL_CHECK_INTERVAL,200}}
   num_sanity_val_steps: 0
   limit_train_batches: null
   limit_val_batches: null

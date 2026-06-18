@@ -93,7 +93,7 @@ class HuginnParquetIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
         input_length: int | None = None,
         drop_last_token: bool = True,
         pad_token_id: int = 65509,
-        num_samples: int = 1024,
+        num_samples: int | None = 1024,
         seed: int = 17,
         shuffle_files: bool = True,
     ):
@@ -103,7 +103,7 @@ class HuginnParquetIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
         self.input_length = input_length
         self.drop_last_token = bool(drop_last_token)
         self.pad_token_id = int(pad_token_id)
-        self.num_samples = int(num_samples)
+        self.num_samples = None if num_samples is None else int(num_samples)
         self.seed = int(seed)
         self.shuffle_files = bool(shuffle_files)
         if self.batch_size <= 0:
@@ -122,9 +122,11 @@ class HuginnParquetIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
         chunks: list[torch.Tensor] = []
         emitted = 0
         seen = 0
-        target_samples = (self.num_samples + shard_count - 1) // shard_count
+        target_samples = None
+        if self.num_samples is not None:
+            target_samples = (self.num_samples + shard_count - 1) // shard_count
         for row in dataset:
-            if emitted >= target_samples:
+            if target_samples is not None and emitted >= target_samples:
                 break
             if seen % shard_count == shard_index:
                 chunks.append(
@@ -141,7 +143,7 @@ class HuginnParquetIterableDataset(IterableDataset[dict[str, torch.Tensor]]):
                     emitted += len(chunks)
                     chunks = []
             seen += 1
-        if chunks and emitted < target_samples:
+        if chunks and (target_samples is None or emitted < target_samples):
             yield _make_token_batch(chunks, self.pad_token_id)
 
     def _distributed_shard(self) -> tuple[int, int]:
@@ -167,9 +169,9 @@ class HuginnParquetDataModule(L.LightningDataModule):
         input_length: int | None = None,
         drop_last_token: bool = True,
         pad_token_id: int = 65509,
-        train_samples: int = 1024,
-        val_samples: int = 64,
-        test_samples: int = 64,
+        train_samples: int | None = 1024,
+        val_samples: int | None = 64,
+        test_samples: int | None = 64,
         val_file_count: int = 2,
         test_file_count: int = 2,
         seed: int = 17,
@@ -193,9 +195,9 @@ class HuginnParquetDataModule(L.LightningDataModule):
             "pad_token_id": pad_token_id,
             "shuffle_files": shuffle_files,
         }
-        self.train_samples = int(train_samples)
-        self.val_samples = int(val_samples)
-        self.test_samples = int(test_samples)
+        self.train_samples = None if train_samples is None else int(train_samples)
+        self.val_samples = None if val_samples is None else int(val_samples)
+        self.test_samples = None if test_samples is None else int(test_samples)
         self.seed = int(seed)
         self.num_workers = int(num_workers)
         self.pin_memory = bool(pin_memory)
@@ -219,7 +221,7 @@ class HuginnParquetDataModule(L.LightningDataModule):
     def _dataset(
         self,
         data_files: Sequence[str],
-        num_samples: int,
+        num_samples: int | None,
         *,
         seed_offset: int,
     ) -> HuginnParquetIterableDataset:

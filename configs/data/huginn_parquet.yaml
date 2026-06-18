@@ -6,9 +6,9 @@ batch_size: 1
 input_length: null
 drop_last_token: true
 pad_token_id: 65509
-train_samples: 1024
-val_samples: 64
-test_samples: 64
+train_samples: null
+val_samples: null
+test_samples: null
 val_file_count: 2
 test_file_count: 2
 seed: ${seed}
