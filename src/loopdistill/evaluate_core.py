@@ -1011,6 +1011,11 @@ def _write_task_metrics(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def _append_task_metrics(path: Path, rows: list[dict[str, Any]], row: dict[str, Any]) -> None:
+    rows.append(row)
+    _write_task_metrics(path, rows)
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     aggregate: dict[str, float] = {"tasks": float(len(rows))}
     numeric_keys = sorted({key for row in rows for key, value in row.items() if isinstance(value, (int, float))})
@@ -1072,6 +1077,7 @@ def run(cfg: DictConfig) -> None:
 
     rows: list[dict[str, Any]] = []
     eval_bundle_dir = _resolve_eval_bundle_dir(tokenized_dir, cfg)
+    task_metrics_path = dirs["metrics"] / "core_tasks.csv"
     if eval_bundle_dir is None and not tokenized_dir.exists():
         raise FileNotFoundError(
             "No CORE eval bundle or tokenized fallback found. Set eval.eval_bundle_dir or eval.tokenized_dir."
@@ -1095,13 +1101,15 @@ def run(cfg: DictConfig) -> None:
                 student_steps=student_steps,
                 max_seq_len=max_seq_len,
             )
-            rows.append(
+            _append_task_metrics(
+                task_metrics_path,
+                rows,
                 {
                     "task": label,
                     "task_type": str(task_meta.get("icl_task_type", "unknown")),
                     "seq_len": None,
                     **metrics,
-                }
+                },
             )
     else:
         warn("Falling back to pretokenized CORE rows; this path does not reconstruct few-shot CORE prompts.")
@@ -1134,9 +1142,8 @@ def run(cfg: DictConfig) -> None:
                 "seq_len": int(task.get("seq_len", 0)),
                 **metrics,
             }
-            rows.append(row)
+            _append_task_metrics(task_metrics_path, rows, row)
 
-    _write_task_metrics(dirs["metrics"] / "core_tasks.csv", rows)
     summary = _aggregate(rows)
     summary.update(
         {
