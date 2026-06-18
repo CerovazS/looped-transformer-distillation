@@ -252,6 +252,44 @@ def test_lightning_live_teacher_two_batches(tmp_path):
     assert (tmp_path / "metrics" / "train.csv").exists()
 
 
+def test_lightning_live_teacher_can_rename_final_test_metrics(tmp_path):
+    student = StudentFlowModel(
+        latent_dim=8,
+        hidden_dim=32,
+        num_layers=1,
+        num_heads=4,
+        vocab_size=16,
+    )
+    module = DistillationModule(
+        student=student,
+        loss_module=LoopDistillationLoss(endpoint_kl_weight=0.0),
+        quality_evaluator=QualityEvaluator(enabled=True, projections=["teacher_head"]),
+        teacher=MockTeacher(latent_dim=8, vocab_size=16, max_depth=2),
+        live_depths=[0, 1, 2],
+        metrics_dir=str(tmp_path / "metrics"),
+        test_metric_prefix="in_distribution_test",
+    )
+    trainer = L.Trainer(
+        max_epochs=1,
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_checkpointing=False,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        limit_test_batches=1,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+
+    trainer.fit(module, datamodule=_TokenOnlyDataModule())
+    trainer.test(module, datamodule=_TokenOnlyDataModule())
+
+    assert "in_distribution_test/loss" in trainer.callback_metrics
+    assert "eval_quality/in_distribution_test/teacher_head/nll_delta" in trainer.callback_metrics
+    assert (tmp_path / "metrics" / "in_distribution_test.csv").exists()
+
+
 def test_hydra_live_experiment_overrides_defaults():
     config_dir = str((Path(__file__).resolve().parents[1] / "configs").resolve())
     with initialize_config_dir(version_base=None, config_dir=config_dir):
@@ -307,3 +345,18 @@ def test_hydra_compositional_k16s8_experiment_compose():
     assert cfg.eval_quality.rollout_steps == 8
     assert cfg.eval_quality.rollout_mode == "flow_map"
     assert cfg.data.batch_size == 8
+
+
+def test_hydra_huginn_recurrent_uses_in_distribution_final_test():
+    config_dir = str((Path(__file__).resolve().parents[1] / "configs").resolve())
+    with initialize_config_dir(version_base=None, config_dir=config_dir):
+        cfg = compose(config_name="config", overrides=["experiment=blackwell_live_huginn_recurrent_k16s8"])
+
+    assert cfg.data._target_ == "loopdistill.data.huginn_parquet.HuginnParquetDataModule"
+    assert cfg.data.input_length is None
+    assert cfg.eval_quality.projections == ["teacher_head"]
+    assert cfg.eval_quality.every_n_epochs == 1
+    assert cfg.final_evaluation.metric_prefix == "in_distribution_test"
+    assert cfg.final_evaluation.metrics_filename == "in_distribution_test.json"
+    assert cfg.trainer.check_val_every_n_epoch == 1
+    assert cfg.trainer.num_sanity_val_steps == 0

@@ -22,6 +22,7 @@ class DistillationModule(L.LightningModule):
         lr: float = 3e-4,
         weight_decay: float = 0.01,
         metrics_dir: str | None = None,
+        test_metric_prefix: str = "test",
     ):
         super().__init__()
         self.student = student
@@ -32,6 +33,7 @@ class DistillationModule(L.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.metrics_dir = Path(metrics_dir) if metrics_dir else None
+        self.test_metric_prefix = str(test_metric_prefix)
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -60,12 +62,13 @@ class DistillationModule(L.LightningModule):
             )
         return metrics["loss"]
 
-    def _quality_step(self, batch: dict[str, Any], prefix: str) -> None:
+    def _quality_step(self, batch: dict[str, Any], prefix: str, *, stage: str | None = None) -> None:
         if self.quality_evaluator is None or not bool(getattr(self.quality_evaluator, "enabled", False)):
             return
-        if prefix == "val" and not self._should_run_val_quality():
+        stage = stage or prefix
+        if stage == "val" and not self._should_run_val_quality():
             return
-        if prefix == "test" and not bool(getattr(self.quality_evaluator, "run_on_test", True)):
+        if stage == "test" and not bool(getattr(self.quality_evaluator, "run_on_test", True)):
             return
         metrics = self.quality_evaluator.compute(batch, self.student, teacher=self.teacher)
         for key, value in metrics.items():
@@ -159,8 +162,8 @@ class DistillationModule(L.LightningModule):
 
     def test_step(self, batch: dict[str, Any], batch_idx: int) -> torch.Tensor:
         batch = self._prepare_batch(batch, "test")
-        loss = self._loss_step(batch, "test")
-        self._quality_step(batch, "test")
+        loss = self._loss_step(batch, self.test_metric_prefix)
+        self._quality_step(batch, self.test_metric_prefix, stage="test")
         return loss
 
     def configure_optimizers(self):
@@ -181,6 +184,9 @@ class DistillationModule(L.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         self._append_metrics("val")
+
+    def on_test_epoch_end(self) -> None:
+        self._append_metrics(self.test_metric_prefix)
 
     def _append_metrics(self, split: str) -> None:
         if self.metrics_dir is None or self.trainer.sanity_checking or not self.trainer.is_global_zero:

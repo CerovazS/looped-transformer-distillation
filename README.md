@@ -33,7 +33,7 @@ In scope:
 - evaluating `K` teacher steps versus `S` student steps under a fixed teacher head;
 - comparing local flow matching, compositional flow maps, MeanFlow, Shortcut, and DEQ variants;
 - keeping local metrics, resolved configs, and run summaries under `outputs/`;
-- supporting synthetic teachers and external Attractor, Parcae, and Ouro-style adapters.
+- supporting synthetic teachers and external Attractor, Huginn, Parcae, and Ouro-style adapters.
 
 Out of scope for the current baseline:
 
@@ -44,7 +44,7 @@ Out of scope for the current baseline:
 
 ## Features
 
-- **Trajectory extraction** from synthetic teachers, Attractor checkpoints, and configurable
+- **Trajectory extraction** from synthetic teachers, Attractor and Huginn checkpoints, and configurable
   external teacher adapters.
 - **Offline distillation** from saved shard/manifest datasets containing latent trajectories,
   tokens, masks, metadata, and optional endpoint logits.
@@ -171,8 +171,8 @@ K16/S8.
 ### 3. Evaluate Endpoint Quality
 
 When endpoint logits are available, `eval_quality.enabled=true` logs language-model quality metrics
-under `eval_quality/val/*` and `eval_quality/test/*`. Live teacher runs can evaluate two endpoint
-projections:
+under `eval_quality/val/*` and the configured final-evaluation prefix, which defaults to
+`eval_quality/test/*`. Live teacher runs can evaluate two endpoint projections:
 
 - `teacher_head`: rolls the student to `z_K_student` and projects it through the original teacher
   `ln_f/lm_head`;
@@ -228,11 +228,46 @@ Parcae-style external repositories can be connected through `ExternalRepoTeacher
 the repository path, module path, class name, checkpoint, and tokenizer configuration. Ouro
 models are configured through the Hugging Face-based `OuroTeacher`.
 
+### Huginn Recurrent Teacher
+
+Huginn integration is configured through `configs/teacher/huginn.yaml`. The intended remote layout
+keeps the official repository, model weights, and sampled pretraining data outside this repo:
+
+```text
+/workspace/external/recurrent-pretraining
+/workspace/external/models/huginn-0125
+/workspace/datasets/huginn_train_random_50gib_20260618_1600
+```
+
+The Huginn adapter uses the official Hugging Face interface with `trust_remote_code=true` and
+projects student endpoints through Huginn's original teacher head. The recurrent student templates
+train on already-tokenized Huginn parquet rows and keep the full available context:
+
+```bash
+uv run loopdistill-train \
+  experiment=blackwell_live_huginn_recurrent_k16s8 \
+  run_id=live_huginn_recurrent_k16s8_<unique_id> \
+  output_dir=outputs/live_distill/live_huginn_recurrent_k16s8_<unique_id>
+```
+
+For a cheaper student rollout budget, use:
+
+```bash
+uv run loopdistill-train \
+  experiment=blackwell_live_huginn_recurrent_k16s4 \
+  run_id=live_huginn_recurrent_k16s4_<unique_id> \
+  output_dir=outputs/live_distill/live_huginn_recurrent_k16s4_<unique_id>
+```
+
+These configs use `input_length: null`, so the data loader does not impose a sequence-length cap.
+Rows with 4097 Huginn tokens are passed as 4096-token next-token inputs by dropping the last target
+token.
+
 ## Configuration
 
 The main Hydra config is `configs/config.yaml`. Common override points include:
 
-- `teacher=<name>`: teacher adapter (`mock`, `attractor`, `ouro`, `parcae`)
+- `teacher=<name>`: teacher adapter (`mock`, `attractor`, `huginn`, `ouro`, `parcae`)
 - `data=<name>`: offline trajectory data or live text batches
 - `student=<name>`: student model size and architecture
 - `loss=<name>`: distillation objective
@@ -258,6 +293,26 @@ outputs/<pipeline>/<run_id>/
 Typical metrics include training loss, validation loss, endpoint KL, NLL/PPL deltas, top-1
 agreement, top-k overlap, rollout reconstruction error, and fixed-point or stability diagnostics
 when those objectives are enabled.
+
+### Validation And Final Evaluation Semantics
+
+Training-time validation and language-model quality evaluation are intentionally separated:
+
+- `val/*` metrics are distillation losses on a held-out validation split. For Huginn recurrent
+  runs, this is a cheap file-level holdout from the sampled Huginn parquet data.
+- `eval_quality/val/*` metrics roll the student endpoint forward and compare its teacher-head
+  logits against the teacher endpoint on the same validation batches. Huginn recurrent configs
+  default to `every_n_epochs=1`, and the cadence can be changed with
+  `HUGINN_QUALITY_EVERY_N_EPOCHS=<n>`.
+- Huginn recurrent configs keep the old parquet test loader only as an in-distribution sanity
+  check. Its metrics are written under `in_distribution_test/*` and
+  `eval_quality/in_distribution_test/*`, with the JSON summary at
+  `metrics/in_distribution_test.json`.
+
+This in-distribution check is not a reasoning benchmark. Scientific claims about reasoning should
+come from a separate benchmark pass, for example `arc_challenge`, `commonsense_qa`, or other CORE
+tasks, comparing the Huginn teacher against the trained student endpoint under the same prompt and
+teacher-head projection policy.
 
 ## Development
 

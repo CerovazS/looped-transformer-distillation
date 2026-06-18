@@ -45,6 +45,7 @@ def write_run_summary(
     title: str,
     metrics: dict[str, Any] | None = None,
     started_at: float | None = None,
+    metrics_filename: str = "test.json",
 ) -> None:
     report_dir = Path(output_dir) / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -60,4 +61,4 @@ def write_run_summary(
     if metrics is not None:
         metrics_dir = Path(output_dir) / "metrics"
         metrics_dir.mkdir(parents=True, exist_ok=True)
-        (metrics_dir / "test.json").write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+        (metrics_dir / metrics_filename).write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")

@@ -27,9 +27,14 @@ eval_quality:
   temperature: 1.0
   rollout_steps: 4
   rollout_mode: flow_map
-  every_n_epochs: 1
+  every_n_epochs: ${oc.decode:${oc.env:HUGINN_QUALITY_EVERY_N_EPOCHS,1}}
   run_on_test: true
   require_logits: true
+
+final_evaluation:
+  enabled: true
+  metric_prefix: in_distribution_test
+  metrics_filename: in_distribution_test.json
 
 data:
   train_samples: 2048
@@ -54,6 +59,8 @@ trainer:
   precision: bf16-mixed
   accumulate_grad_batches: 1
   log_every_n_steps: 10
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 0
   limit_train_batches: null
   limit_val_batches: null
   limit_test_batches: null

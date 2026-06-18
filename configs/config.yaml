@@ -55,4 +55,9 @@ live:
   enabled: false
   depths: null
 
+final_evaluation:
+  enabled: true
+  metric_prefix: test
+  metrics_filename: test.json
+
 mode: train
