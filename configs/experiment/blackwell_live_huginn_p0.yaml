@@ -1,0 +1,66 @@
+# @package _global_
+name: blackwell_live_huginn_p0
+run_id: live_p0_huginn_k32_s4096_${now:%Y%m%d_%H%M%S}
+output_dir: outputs/live_distill/${run_id}
+
+defaults:
+  - override /data: live_text
+  - override /teacher: huginn
+
+live:
+  enabled: true
+  depths: ${oc.decode:${oc.env:HUGINN_DEPTHS,"[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]"}}
+
+student:
+  latent_dim: 5280
+  hidden_dim: 1024
+  num_layers: 2
+  num_heads: 8
+  vocab_size: 65536
+  max_seq_len: 4096
+
+loss:
+  fm_weight: 1.0
+  endpoint_kl_weight: 0.0
+  latent_reconstruction_weight: 1.0
+  stability_weight: 0.05
+  rollout_steps: 8
+
+eval_quality:
+  enabled: true
+  projections:
+    - student_head
+    - teacher_head
+  top_k: 5
+  temperature: 1.0
+  rollout_steps: 8
+  every_n_epochs: 1
+  run_on_test: true
+
+data:
+  tokenizer_dir: /workspace/external/models/huginn-0125
+  batch_size: 1
+  seq_len: 4096
+  train_samples: 1024
+  val_samples: 64
+  test_samples: 64
+  num_workers: 2
+  pin_memory: true
+
+teacher:
+  max_depth: 32
+  return_logits: false
+  logit_depths: final
+
+trainer:
+  max_epochs: 1
+  accelerator: gpu
+  devices: 4
+  strategy: ddp_find_unused_parameters_true
+  precision: bf16-mixed
+  accumulate_grad_batches: 1
+  log_every_n_steps: 10
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  enable_checkpointing: false
