@@ -73,3 +73,38 @@ def test_huginn_recurrent_student_uses_huginn_core_block_and_step_indexing():
     assert out.z_next is not None
     assert out.z_next.shape == z.shape
     assert model.seen_block_idx == [1, 33]
+
+
+def test_huginn_recurrent_student_can_share_teacher_base_model():
+    class _FakeTeacher:
+        def __init__(self):
+            self.model = _FakeHuginn()
+
+        def _load_model(self):
+            return self.model
+
+    teacher = _FakeTeacher()
+    original_adapter = teacher.model.transformer.adapter
+    original_core_block = teacher.model.transformer.core_block
+    student = HuginnRecurrentStudent(
+        target_depth=16,
+        trainable_parts=("adapter", "core_block"),
+        share_base_model_from_teacher=True,
+    )
+
+    student.initialize_from_teacher(teacher)
+
+    names = [name for name, _ in student.named_parameters()]
+    assert names
+    assert all(name.startswith(("adapter.", "core_block.")) for name in names)
+
+    z = torch.randn(2, 3, 4)
+    tokens = torch.randint(0, 16, (2, 3))
+    t = torch.tensor([0.0, 0.5])
+    delta = torch.full((2,), 0.25)
+    out = student(z, t, delta, tokens=tokens)
+
+    assert out.z_next is not None
+    assert out.z_next.shape == z.shape
+    assert teacher.model.transformer.adapter is original_adapter
+    assert teacher.model.transformer.core_block is original_core_block

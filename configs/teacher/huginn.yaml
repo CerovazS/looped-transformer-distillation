@@ -1,7 +1,7 @@
 _target_: loopdistill.teachers.huginn.HuginnTeacher
 teacher_id: huginn
 model_id: tomg-group-umd/huginn-0125
-checkpoint_dir: /workspace/external/models/huginn-0125
+checkpoint_dir: ${oc.env:HUGINN_CHECKPOINT_DIR,/workspace/external/models/huginn-0125}
 device: auto
 dtype: bfloat16
 storage_dtype: bfloat16

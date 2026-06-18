@@ -1,6 +1,6 @@
 _target_: loopdistill.models.huginn.HuginnRecurrentStudent
 model_id: tomg-group-umd/huginn-0125
-checkpoint_dir: /workspace/external/models/huginn-0125
+checkpoint_dir: ${oc.env:HUGINN_CHECKPOINT_DIR,/workspace/external/models/huginn-0125}
 dtype: bfloat16
 trust_remote_code: true
 target_depth: 16
@@ -8,3 +8,4 @@ trainable_parts:
   - adapter
   - core_block
 return_logits: false
+share_base_model_from_teacher: true

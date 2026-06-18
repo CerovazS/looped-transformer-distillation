@@ -34,6 +34,7 @@ class DistillationModule(L.LightningModule):
         self.weight_decay = weight_decay
         self.metrics_dir = Path(metrics_dir) if metrics_dir else None
         self.test_metric_prefix = str(test_metric_prefix)
+        self._teacher_student_connected = False
 
     def _move_batch(self, batch: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -167,13 +168,25 @@ class DistillationModule(L.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        self._connect_live_teacher_student()
         return torch.optim.AdamW(self.student.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
+    def configure_model(self) -> None:
+        self._connect_live_teacher_student()
+
     def on_fit_start(self) -> None:
-        self._place_live_teacher()
+        self._connect_live_teacher_student()
 
     def on_test_start(self) -> None:
+        self._connect_live_teacher_student()
+
+    def _connect_live_teacher_student(self) -> None:
+        if self._teacher_student_connected:
+            return
         self._place_live_teacher()
+        if self.teacher is not None and hasattr(self.student, "initialize_from_teacher"):
+            self.student.initialize_from_teacher(self.teacher)
+        self._teacher_student_connected = True
 
     def _place_live_teacher(self) -> None:
         if self.teacher is not None and hasattr(self.teacher, "set_device"):

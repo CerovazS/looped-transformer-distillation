@@ -358,6 +358,8 @@ def test_hydra_huginn_recurrent_uses_in_distribution_final_test():
     assert cfg.eval_quality.every_n_epochs == 1
     assert cfg.data.train_samples is None
     assert cfg.trainer.val_check_interval == 200
+    assert cfg.trainer.strategy == "ddp"
+    assert cfg.student.share_base_model_from_teacher is True
     assert cfg.final_evaluation.metric_prefix == "in_distribution_test"
     assert cfg.final_evaluation.metrics_filename == "in_distribution_test.json"
     assert cfg.trainer.check_val_every_n_epoch == 1
